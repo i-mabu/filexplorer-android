@@ -1,7 +1,7 @@
-# ファイル管理 (FileXplorer) — Android用ファイル管理アプリ v1.0.1
+# ファイル管理 (FileXplorer) — Android用ファイル管理アプリ v1.1.0
 
 Google Files のような使い勝手を目指した、Android用ファイル管理（エクスプローラー風）アプリです。
-Java・外部依存ゼロ（Android標準APIのみ）、minSdk 26 / targetSdk 34、パッケージ `jp.filexplorer.app`。
+Kotlin・外部ライブラリなし（Android標準API + Kotlin標準ライブラリのみ）、minSdk 26 / targetSdk 34、パッケージ `jp.filexplorer.app`。
 
 ## 機能
 
@@ -42,11 +42,16 @@ Java・外部依存ゼロ（Android標準APIのみ）、minSdk 26 / targetSdk 34
 Gradle/AGPを使わないオフライン手動ビルド（aapt2 + javac + d8）です。要 JDK 21 と Android SDK (platform 34 / build-tools 34.0.0)。
 
 ```sh
-./tests/run-tests.sh   # 単体テスト (FileOps: 66件)
+./tests/run-tests.sh   # 単体テスト (FileOps: 66件、Kotlin)
 ./build-apk.sh         # dist/filexplorer.apk を生成 (デバッグ署名)
 ```
 
 Android Studio で開くための Gradle ファイル（AGP 8.7.3）も同梱しています。
+
+## v1.1.0 での変更（Kotlin化）
+- 全ソース (FileOps / MainActivity / SimpleFileProvider / FileListAdapter) と単体テストを Java から Kotlin 2.0.21 に書き換え。機能・挙動は v1.0.1 と同一で、単体テスト66件もそのまま移植して全パス
+- ビルドは kotlinc + d8 の手動パイプラインに変更（Kotlin ランタイムを同梱）。Gradle 側も Kotlin プラグイン対応に更新
+- APK が 37KB → 約730KB になっています（Kotlin 標準ライブラリ分）
 
 ## v1.0.1 での修正（全ファイルレビュー）
 - コピー/移動の安全化: フォルダを自分自身や配下へコピーすると無限再帰になる問題を禁止。貼り付け先は開始時点のフォルダに固定。同じフォルダへの切り取り貼り付けは無効化
@@ -60,7 +65,7 @@ Android Studio で開くための Gradle ファイル（AGP 8.7.3）も同梱し
 
 ## 検証状況・制限
 - 単体テスト 66/66 パス、APKビルド成功、aapt2 badging（package / versionName 1.0.1）と apksigner verify を確認済み
-- APK: 37,459 bytes、sha256 `8c41c2d4522e032905840eb380cacf00e5c70bdd986c1ff44a7e60bd7a0b624f`（デバッグ署名、v1.0.0 と同一キーで上書きインストール可）
+- APK: 729,683 bytes、sha256 `e75ad7be88611360e563ed58c02bb7a541790acbe0bc6fc04e5b4b9a8e82ecb4`（デバッグ署名、従来と同一キーで上書きインストール可。Kotlin ランタイムを含むため v1.0.x の 37KB から大きくなっています）
 - 実機での動作は未検証です（この環境に実機/エミュレータがないため）
 - カテゴリ・最近・検索の走査は内部ストレージ全体が対象のため、ファイル数が非常に多い環境では時間がかかることがあります（走査上限 8,000件 / 深さ 8 で打ち切り）
 - ごみ箱、圧縮ファイルの解凍、クラウドストレージ連携は未実装です

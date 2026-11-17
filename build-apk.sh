@@ -11,6 +11,13 @@ AJAR="$SDK/platforms/android-34/android.jar"
 [ -f "$AJAR" ] || { echo "android.jar が見つかりません: $AJAR" >&2; exit 1; }
 [ -x "$BT/aapt2" ] || { echo "aapt2 が見つかりません: $BT" >&2; exit 1; }
 JAVAC="$JAVA_HOME/bin/javac"; KEYTOOL="$JAVA_HOME/bin/keytool"
+KOTLINC="${KOTLINC:-}"
+if [ -z "$KOTLINC" ]; then
+  if [ -x "$HOME/workspace/tools/kotlin/bin/kotlinc" ]; then KOTLINC="$HOME/workspace/tools/kotlin/bin/kotlinc"; else KOTLINC="$(command -v kotlinc)"; fi
+fi
+KOTLIN_HOME_DIR="$(cd "$(dirname "$KOTLINC")/.." && pwd)"
+STDLIB="$KOTLIN_HOME_DIR/lib/kotlin-stdlib.jar"
+[ -f "$STDLIB" ] || { echo "kotlin-stdlib.jar が見つかりません: $STDLIB" >&2; exit 1; }
 command -v "$JAVAC" >/dev/null 2>&1 || JAVAC=javac
 command -v "$KEYTOOL" >/dev/null 2>&1 || KEYTOOL=keytool
 BUILD=build/manual
@@ -23,11 +30,13 @@ sed 's|<manifest xmlns:android="http://schemas.android.com/apk/res/android"|<man
 "$BT/aapt2" link -o "$BUILD/app-unsigned.apk" -I "$AJAR" \
   --manifest "$BUILD/AndroidManifest.xml" "$BUILD/compiled.zip" \
   --java "$BUILD/gen" --min-sdk-version 26 --target-sdk-version 34
-echo "[3/6] javac"
-find app/src/main/java "$BUILD/gen" -name '*.java' > "$BUILD/sources.txt"
-"$JAVAC" --release 17 -encoding UTF-8 -cp "$AJAR" -d "$BUILD/classes" @"$BUILD/sources.txt"
-echo "[4/6] d8"
-"$BT/d8" --min-api 26 --output "$BUILD/dex" $(find "$BUILD/classes" -name '*.class')
+echo "[3/6] kotlinc (+ javac for generated R.java)"
+find app/src/main/java -name '*.kt' > "$BUILD/sources.txt"
+"$KOTLINC" -nowarn -jvm-target 17 -cp "$AJAR" -d "$BUILD/classes" @"$BUILD/sources.txt"
+find "$BUILD/gen" -name '*.java' > "$BUILD/rsources.txt"
+if [ -s "$BUILD/rsources.txt" ]; then "$JAVAC" --release 17 -encoding UTF-8 -cp "$AJAR" -d "$BUILD/classes" @"$BUILD/rsources.txt"; fi
+echo "[4/6] d8 (アプリ本体 + kotlin-stdlib)"
+"$BT/d8" --min-api 26 --output "$BUILD/dex" $(find "$BUILD/classes" -name '*.class') "$STDLIB"
 echo "[5/6] package + zipalign"
 cp "$BUILD/app-unsigned.apk" "$BUILD/app-with-dex.apk"
 ( cd "$BUILD/dex" && zip -q -uj ../app-with-dex.apk classes.dex )
