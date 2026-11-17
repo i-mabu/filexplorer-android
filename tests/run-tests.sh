@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# FileXplorer - 単体テスト (FileOps の純粋ロジックを kotlinc でコンパイルして JVM で実行する)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 export JAVA_HOME="${JAVA_HOME:-$HOME/workspace/tools/jdk-21}"

@@ -61,7 +61,7 @@ fun main() {
     check("safe ng dotdot", !FileOps.isSafeName(".."))
     eq("safeName slash", "a_b", FileOps.safeName("a/b"))
 
-    // filesystem ops in temp dir
+    // ファイルシステム操作 (一時フォルダで実施)
     val root = File(System.getProperty("java.io.tmpdir"), "filexplorer-test-" + System.nanoTime())
     root.mkdirs()
     try {
@@ -72,10 +72,10 @@ fun main() {
         eq("totalSize", 13L, FileOps.totalSize(root))
         val counts = FileOps.countItems(root)
         eq("count files", 3, counts[0]); eq("count dirs", 1, counts[1])
-        // listDir hidden filter
+        // listDir の隠しファイル絞り込み
         eq("list no hidden", 2, FileOps.listDir(root, false).size)
         eq("list with hidden", 3, FileOps.listDir(root, true).size)
-        // uniqueFile
+        // uniqueFile (同名回避)
         eq("unique", "a (1).txt", FileOps.uniqueFile(root, "a.txt").name)
         eq("unique free", "new.txt", FileOps.uniqueFile(root, "new.txt").name)
         // copy
@@ -84,7 +84,7 @@ fun main() {
         check("copy exists", copied.exists() && copied.length() == 5L)
         val copied2 = FileOps.copyRecursive(a, dstDir)
         eq("copy unique name", "a (1).txt", copied2.name)
-        // copy folder
+        // フォルダのコピー
         val copiedDir = FileOps.copyRecursive(sub, dstDir)
         check("copy dir", File(copiedDir, "b.txt").exists())
         // search
@@ -92,38 +92,38 @@ fun main() {
         eq("search hits", 2, found.size)
         check("search case", FileOps.searchRecursive(root, "A.TXT", 10, 5).size >= 1)
         eq("search empty query", 0, FileOps.searchRecursive(root, " ", 10, 5).size)
-        // category collect
+        // カテゴリ収集
         write(File(root, "pic.png"), "img")
         val imgs = FileOps.collectByCategory(root, FileOps.CAT_IMAGE, 10, 5)
         eq("collect image", 1, imgs.size)
         val recents = FileOps.collectRecent(root, 3, 5)
         check("recent limit", recents.size <= 3 && recents.isNotEmpty())
-        // recent must be newest-first by mtime
+        // 最近ファイルは更新日時の新しい順
         val oldF = write(File(root, "old.txt"), "o"); oldF.setLastModified(1000000000000L)
         val newF = write(File(root, "new.txt"), "n"); newF.setLastModified(1900000000000L)
         val rec2 = FileOps.collectRecent(root, 50, 5)
         check("recent newest first", rec2[0].name == "new.txt")
-        // sort: folders first, name asc
+        // 並び替え: フォルダ優先・名前昇順
         val list = mutableListOf(File(root, "z.txt"), sub, a)
         FileOps.sortFiles(list, FileOps.SORT_NAME, true)
         check("sort folder first", list[0].isDirectory)
         eq("sort name", "a.txt", list[1].name)
         FileOps.sortFiles(list, FileOps.SORT_NAME, false)
         eq("sort name desc", "z.txt", list[1].name)
-        // formatSize boundary: 1,048,575 B must not show "1024 KB"
+        // formatSize の境界: 1,048,575 B が "1024 KB" と表示されないこと
         eq("size boundary", "1.00 MB", FileOps.formatSize(1048575))
         // isSameOrInside
         check("inside true", FileOps.isSameOrInside(root, sub))
         check("inside self", FileOps.isSameOrInside(root, root))
         check("inside false", !FileOps.isSameOrInside(sub, root))
-        // copy into itself / subfolder must be rejected
+        // 自分自身・配下へのコピーは拒否されること
         var rejected = false
         try { FileOps.copyRecursive(sub, sub) } catch (e: IOException) { rejected = true }
         check("copy into itself rejected", rejected)
         var rejected2 = false
         try { FileOps.copyRecursive(root, sub) } catch (e: IOException) { rejected2 = true }
         check("copy into subfolder rejected", rejected2)
-        // symlink loop must not hang / overflow in totalSize, count, search, collect
+        // シンボリックリンクのループで totalSize・件数・検索・収集が止まらないこと
         try {
             Files.createSymbolicLink(File(root, "loop").toPath(), root.toPath())
             val sz = FileOps.totalSize(root)
@@ -137,7 +137,7 @@ fun main() {
         } catch (e: Exception) {
             println("symlink tests skipped: $e")
         }
-        // delete recursive
+        // 再帰削除
         check("delete dir", FileOps.deleteRecursive(dstDir))
         check("deleted gone", !dstDir.exists())
     } finally {

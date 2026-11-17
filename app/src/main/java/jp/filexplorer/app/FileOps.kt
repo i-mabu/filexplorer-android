@@ -11,6 +11,8 @@ import java.util.Locale
 
 // ===== FileOps: GUI非依存の純粋ロジック (JVM単体テスト対象) =====
 object FileOps {
+    // カテゴリと並び替えは enum ではなく int 定数で表す
+    // (SharedPreferences の保存値や単体テストの期待値とそのまま対応させるため)
     const val CAT_IMAGE = 0
     const val CAT_VIDEO = 1
     const val CAT_AUDIO = 2
@@ -326,7 +328,7 @@ object FileOps {
         return out
     }
 
-    // visited は呼び出しごとのカウンタ配列で持つ (static だと並行実行で競合する)
+    // visited は呼び出しごとのカウンタ配列で持つ (共有カウンタにすると並行実行で競合するため)
     private fun collectRec(f: File?, out: MutableList<File>, max: Int, depth: Int, maxDepth: Int, cat: Int, visited: IntArray) {
         if (out.size >= max || depth > maxDepth || f == null || visited[0] > MAX_VISITED) return
         val kids = f.listFiles() ?: return

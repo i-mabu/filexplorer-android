@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# FileXplorer - オフライン手動ビルド (Gradle/AGPを使わず aapt2 + javac + d8 でAPKを作る)
+# FileXplorer - オフライン手動ビルド (Gradle/AGPを使わず aapt2 + kotlinc + d8 でAPKを作る)
 set -euo pipefail
 cd "$(dirname "$0")"
 export LANG="${LANG:-C.UTF-8}" LC_ALL="${LC_ALL:-C.UTF-8}"

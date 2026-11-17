@@ -1,3 +1,4 @@
+// Android Studio 用の設定。本体のビルドと検証は build-apk.sh (手動パイプライン) で行う
 plugins { id 'com.android.application'; id 'org.jetbrains.kotlin.android' }
 android {
     namespace 'jp.filexplorer.app'
