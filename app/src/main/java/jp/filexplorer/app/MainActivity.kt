@@ -1,38 +1,67 @@
 package jp.filexplorer.app
 
 import android.Manifest
-import android.app.Activity
-import android.app.AlertDialog
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.Settings
-import android.view.Gravity
-import android.view.View
-import android.view.ViewGroup
-import android.widget.Button
-import android.widget.EditText
-import android.widget.ImageView
-import android.widget.LinearLayout
-import android.widget.ListView
-import android.widget.ProgressBar
-import android.widget.ScrollView
-import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.Image
 import java.io.File
 import java.io.FileInputStream
 import java.nio.charset.StandardCharsets
 import java.util.ArrayDeque
 
-// ===== FileXplorer: Google Files 風のファイル管理アプリ =====
+// ===== FileXplorer: Google Files 風のファイル管理アプリ (UI は Jetpack Compose) =====
 // ホーム = カテゴリ + ストレージ、閲覧 = エクスプローラー風リスト
-class MainActivity : Activity() {
+class MainActivity : ComponentActivity() {
     companion object {
         private const val MODE_HOME = 0
         private const val MODE_BROWSE = 1
@@ -41,15 +70,21 @@ class MainActivity : Activity() {
         private const val MODE_SEARCH = 4
     }
 
-    private lateinit var titleView: TextView
-    private lateinit var pathView: TextView
-    private lateinit var storageView: TextView
-    private lateinit var emptyView: TextView
-    private lateinit var storageBar: ProgressBar
-    private lateinit var listView: ListView
-    private lateinit var bottomBar: LinearLayout
-    private lateinit var pasteBar: LinearLayout
-    private lateinit var adapter: FileListAdapter
+    // ----- ダイアログ状態 (Compose の AlertDialog で表示する) -----
+    private sealed interface UiDialog {
+        data object Menu : UiDialog
+        data object Sort : UiDialog
+        data class Search(val basePath: String, val baseName: String) : UiDialog
+        data object JumpPath : UiDialog
+        data class Create(val folder: Boolean) : UiDialog
+        data class Rename(val path: String) : UiDialog
+        data object DeleteConfirm : UiDialog
+        data class Details(val file: File, val message: String) : UiDialog
+        data class ImagePreview(val file: File, val bitmap: Bitmap) : UiDialog
+        data class TextPreview(val file: File, val text: String) : UiDialog
+        data class FavRemove(val path: String) : UiDialog
+        data object Permission : UiDialog
+    }
 
     private var mode = MODE_HOME
     private var currentDir: File? = null
@@ -69,6 +104,10 @@ class MainActivity : Activity() {
     private var sortAsc = true
     private var showHidden = false
 
+    // 再描画トリガとダイアログ表示状態 (フィールドの変更後に uiTick を進めると再コンポーズされる)
+    private var uiTick by mutableIntStateOf(0)
+    private var dialog by mutableStateOf<UiDialog?>(null)
+
     private fun internalRoot(): File {
         return Environment.getExternalStorageDirectory() ?: filesDir
     }
@@ -80,7 +119,7 @@ class MainActivity : Activity() {
         sortAsc = prefs.getBoolean("sortAsc", true)
         showHidden = prefs.getBoolean("showHidden", false)
         currentDir = internalRoot()
-        buildUi()
+        setContent { AppScreen() }
         if (savedInstanceState != null && restoreState(savedInstanceState)) {
             // 復元できた場合はホームに戻さない (回転などで閲覧位置とクリップボードを保持)
         } else {
@@ -133,148 +172,347 @@ class MainActivity : Activity() {
         } catch (e: Exception) { return false }
     }
 
-    // ----- UI構築 -----
-    private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
-
-    private fun buildUi() {
-        val root = LinearLayout(this)
-        root.orientation = LinearLayout.VERTICAL
-        root.setBackgroundColor(Color.WHITE)
-
-        val header = LinearLayout(this)
-        header.orientation = LinearLayout.HORIZONTAL
-        header.gravity = Gravity.CENTER_VERTICAL
-        header.setPadding(dp(12), dp(10), dp(8), dp(10))
-        header.setBackgroundColor(Color.rgb(232, 240, 254))
-        titleView = TextView(this)
-        titleView.textSize = 20f
-        titleView.setTextColor(Color.rgb(32, 33, 36))
-        titleView.text = "📂 ファイル"
-        titleView.layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-        header.addView(titleView)
-        val searchBtn = Button(this); searchBtn.text = "🔍"
-        searchBtn.setOnClickListener { askSearch() }
-        header.addView(searchBtn)
-        val menuBtn = Button(this); menuBtn.text = "⋮"
-        menuBtn.setOnClickListener { showMenu() }
-        header.addView(menuBtn)
-        root.addView(header)
-
-        storageView = TextView(this)
-        storageView.textSize = 13f
-        storageView.setPadding(dp(12), dp(6), dp(12), 0)
-        root.addView(storageView)
-        storageBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal)
-        val bp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(10))
-        bp.setMargins(dp(12), dp(2), dp(12), dp(4))
-        storageBar.layoutParams = bp
-        root.addView(storageBar)
-
-        pathView = TextView(this)
-        pathView.textSize = 13f
-        pathView.setTextColor(Color.rgb(95, 99, 104))
-        pathView.setPadding(dp(12), dp(6), dp(12), dp(6))
-        pathView.setOnClickListener { if (mode == MODE_BROWSE) askJumpPath() }
-        root.addView(pathView)
-
-        emptyView = TextView(this)
-        emptyView.textSize = 15f
-        emptyView.gravity = Gravity.CENTER
-        emptyView.setPadding(dp(16), dp(24), dp(16), dp(24))
-        emptyView.visibility = View.GONE
-        root.addView(emptyView)
-
-        listView = ListView(this)
-        listView.layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f)
-        adapter = FileListAdapter(this)
-        listView.adapter = adapter
-        listView.setOnItemClickListener { _, _, pos, _ -> onItemClick(pos) }
-        listView.setOnItemLongClickListener { _, _, pos, _ -> onItemLongClick(pos); true }
-        root.addView(listView)
-
-        pasteBar = LinearLayout(this)
-        pasteBar.orientation = LinearLayout.HORIZONTAL
-        pasteBar.setPadding(dp(8), dp(4), dp(8), dp(4))
-        pasteBar.setBackgroundColor(Color.rgb(254, 247, 224))
-        val pasteBtn = Button(this); pasteBtn.text = "ここに貼り付け"
-        pasteBtn.setOnClickListener { doPaste() }
-        pasteBar.addView(pasteBtn)
-        val cancelBtn = Button(this); cancelBtn.text = "キャンセル"
-        cancelBtn.setOnClickListener { clipboard.clear(); refresh() }
-        pasteBar.addView(cancelBtn)
-        pasteBar.visibility = View.GONE
-        root.addView(pasteBar)
-
-        bottomBar = LinearLayout(this)
-        bottomBar.orientation = LinearLayout.HORIZONTAL
-        bottomBar.setPadding(dp(4), dp(4), dp(4), dp(4))
-        bottomBar.setBackgroundColor(Color.rgb(232, 240, 254))
-        addBottom("コピー") { setClipboard(false) }
-        addBottom("切り取り") { setClipboard(true) }
-        addBottom("名前変更") { askRenameSingle() }
-        addBottom("詳細") { showDetailsSingle() }
-        addBottom("削除") { askDeleteSelected() }
-        bottomBar.visibility = View.GONE
-        root.addView(bottomBar)
-
-        setContentView(root)
+    private fun toast(msg: String, long: Boolean = true) {
+        Toast.makeText(this, msg, if (long) Toast.LENGTH_LONG else Toast.LENGTH_SHORT).show()
     }
 
-    private fun addBottom(label: String, l: View.OnClickListener) {
-        val b = Button(this); b.text = label; b.textSize = 12f
-        b.setOnClickListener(l); bottomBar.addView(b)
-    }
+    // ================================================================
+    //  Compose UI
+    // ================================================================
+    private val headerBlue = Color(232, 240, 254)
+    private val nameColor = Color(32, 33, 36)
+    private val subColor = Color(95, 99, 104)
+    private val pasteYellow = Color(254, 247, 224)
 
-    // FileListAdapter から呼ばれる行描画
-    fun buildRow(pos: Int, convert: View?): View {
-        // 行の再利用 (convertView) でスクロールの GC 負荷を下げる
-        val row: LinearLayout
-        val icon: TextView
-        val name: TextView
-        val sub: TextView
-        val conv = convert as? LinearLayout
-        if (conv != null && conv.childCount == 2 && conv.getChildAt(1) is LinearLayout
-            && (conv.getChildAt(1) as LinearLayout).childCount == 2) {
-            row = conv
-            icon = row.getChildAt(0) as TextView
-            val texts0 = row.getChildAt(1) as LinearLayout
-            name = texts0.getChildAt(0) as TextView
-            sub = texts0.getChildAt(1) as TextView
-            row.setBackgroundColor(Color.WHITE)
-        } else {
-            row = LinearLayout(this)
-            row.orientation = LinearLayout.HORIZONTAL
-            row.gravity = Gravity.CENTER_VERTICAL
-            row.setPadding(dp(12), dp(10), dp(12), dp(10))
-            icon = TextView(this); icon.textSize = 26f
-            val texts = LinearLayout(this)
-            texts.orientation = LinearLayout.VERTICAL
-            name = TextView(this); name.textSize = 16f; name.setTextColor(Color.rgb(32, 33, 36))
-            sub = TextView(this); sub.textSize = 12f; sub.setTextColor(Color.rgb(95, 99, 104))
-            texts.addView(name); texts.addView(sub)
-            row.addView(icon); row.addView(texts)
-        }
-        if (mode == MODE_HOME) {
-            val act = homeActions[pos]
-            icon.text = homeIcon(act)
-            name.text = homeLabel(act)
-            sub.text = homeSub(act)
-        } else {
-            val f = currentFiles[pos]
-            val sel = selected.contains(f.absolutePath)
-            icon.text = if (sel) "✅" else FileOps.iconFor(f)
-            name.text = f.name
-            if (f.isDirectory) {
-                val k = f.listFiles()
-                sub.text = "${k?.size ?: 0} 項目 • ${FileOps.formatDate(f.lastModified())}"
-            } else {
-                sub.text = "${FileOps.formatSize(f.length())} • ${FileOps.formatDate(f.lastModified())}"
+    @Composable
+    private fun AppScreen() {
+        @Suppress("UNUSED_VARIABLE") val tick = uiTick // 購読して再コンポーズのトリガにする
+        BackHandler { handleBack() }
+        MaterialTheme {
+            Surface(color = Color.White, modifier = Modifier.fillMaxSize()) {
+                Column(Modifier.fillMaxSize().background(Color.White)) {
+                    // ヘッダー
+                    Row(
+                        Modifier.fillMaxWidth().background(headerBlue)
+                            .padding(start = 12.dp, top = 10.dp, end = 8.dp, bottom = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "📂 $currentTitle" + if (selected.isEmpty()) "" else "（${selected.size}件選択）",
+                            fontSize = 20.sp, color = nameColor, modifier = Modifier.weight(1f)
+                        )
+                        TextButton(onClick = { askSearch() }) { Text("🔍", fontSize = 18.sp) }
+                        TextButton(onClick = { dialog = UiDialog.Menu }) { Text("⋮", fontSize = 18.sp) }
+                    }
+                    if (mode == MODE_HOME) StorageInfo()
+                    // パス表示 (閲覧中はタップでパス入力へ)
+                    Text(
+                        pathText(),
+                        fontSize = 13.sp, color = subColor,
+                        modifier = Modifier.fillMaxWidth()
+                            .clickable(enabled = mode == MODE_BROWSE) { dialog = UiDialog.JumpPath }
+                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                    )
+                    Box(Modifier.weight(1f).fillMaxWidth()) {
+                        if (isEmptyList()) {
+                            Text(
+                                emptyText(), fontSize = 15.sp, textAlign = TextAlign.Center,
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 24.dp)
+                            )
+                        } else {
+                            FileList()
+                        }
+                    }
+                    if (clipboard.isNotEmpty() && mode == MODE_BROWSE) {
+                        Row(
+                            Modifier.fillMaxWidth().background(pasteYellow)
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Button(onClick = { doPaste() }) { Text("ここに貼り付け") }
+                            Button(onClick = { clipboard.clear(); refresh() }) { Text("キャンセル") }
+                        }
+                    }
+                    if (selected.isNotEmpty()) {
+                        Row(
+                            Modifier.fillMaxWidth().background(headerBlue)
+                                .padding(horizontal = 4.dp, vertical = 4.dp)
+                        ) {
+                            SelectionButton("コピー") { setClipboard(false) }
+                            SelectionButton("切り取り") { setClipboard(true) }
+                            SelectionButton("名前変更") { askRenameSingle() }
+                            SelectionButton("詳細") { showDetailsSingle() }
+                            SelectionButton("削除") { askDeleteSelected() }
+                        }
+                    }
+                }
             }
-            if (sel) row.setBackgroundColor(Color.rgb(232, 240, 254))
+            Dialogs()
         }
-        return row
     }
 
+    @Composable
+    private fun StorageInfo() {
+        val r = internalRoot()
+        val total = r.totalSpace
+        val free = r.freeSpace
+        if (total <= 0) return
+        val used = total - free
+        Text(
+            "💾 内部ストレージ: ${FileOps.formatSize(used)} / ${FileOps.formatSize(total)} 使用中（空き ${FileOps.formatSize(free)}）",
+            fontSize = 13.sp,
+            modifier = Modifier.fillMaxWidth().padding(start = 12.dp, top = 6.dp, end = 12.dp)
+        )
+        LinearProgressIndicator(
+            progress = { (used.toFloat() / total.toFloat()).coerceIn(0f, 1f) },
+            modifier = Modifier.fillMaxWidth().padding(start = 12.dp, top = 2.dp, end = 12.dp, bottom = 4.dp).height(10.dp)
+        )
+    }
+
+    @Composable
+    private fun androidx.compose.foundation.layout.RowScope.SelectionButton(label: String, onClick: () -> Unit) {
+        Button(
+            onClick = onClick,
+            modifier = Modifier.weight(1f).padding(horizontal = 2.dp),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 2.dp, vertical = 8.dp)
+        ) { Text(label, fontSize = 12.sp) }
+    }
+
+    private fun pathText(): String {
+        return when (mode) {
+            MODE_HOME -> "カテゴリ・保存場所から探せます。長押しは使いません（タップで開く）"
+            MODE_BROWSE -> currentDir!!.absolutePath + "  （タップで移動）"
+            else -> currentTitle + "（内部ストレージ内を集めています）"
+        }
+    }
+
+    private fun isEmptyList(): Boolean {
+        return if (mode == MODE_HOME) homeActions.isEmpty() else currentFiles.isEmpty()
+    }
+
+    private fun emptyText(): String {
+        return when (mode) {
+            MODE_HOME -> ""
+            MODE_BROWSE -> "このフォルダは空です"
+            else -> "見つかりませんでした"
+        }
+    }
+
+    @Composable
+    private fun FileList() {
+        LazyColumn(Modifier.fillMaxSize()) {
+            if (mode == MODE_HOME) {
+                itemsIndexed(homeActions, key = { _, act -> act }) { pos, act ->
+                    EntryRow(
+                        icon = homeIcon(act), name = homeLabel(act), sub = homeSub(act), selected = false,
+                        onClick = { onItemClick(pos) }, onLongClick = { onItemLongClick(pos) }
+                    )
+                }
+            } else {
+                itemsIndexed(currentFiles, key = { _, f -> f.absolutePath }) { pos, f ->
+                    val sel = selected.contains(f.absolutePath)
+                    val sub = if (f.isDirectory) {
+                        val k = f.listFiles()
+                        "${k?.size ?: 0} 項目 • ${FileOps.formatDate(f.lastModified())}"
+                    } else {
+                        "${FileOps.formatSize(f.length())} • ${FileOps.formatDate(f.lastModified())}"
+                    }
+                    EntryRow(
+                        icon = if (sel) "✅" else FileOps.iconFor(f), name = f.name, sub = sub, selected = sel,
+                        onClick = { onItemClick(pos) }, onLongClick = { onItemLongClick(pos) }
+                    )
+                }
+            }
+        }
+    }
+
+    @OptIn(ExperimentalFoundationApi::class)
+    @Composable
+    private fun EntryRow(icon: String, name: String, sub: String, selected: Boolean,
+                         onClick: () -> Unit, onLongClick: () -> Unit) {
+        Row(
+            Modifier.fillMaxWidth()
+                .background(if (selected) headerBlue else Color.White)
+                .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(icon, fontSize = 26.sp)
+            Column {
+                Text(name, fontSize = 16.sp, color = nameColor)
+                Text(sub, fontSize = 12.sp, color = subColor)
+            }
+        }
+    }
+
+    // ----- ダイアログ群 -----
+    @Composable
+    private fun Dialogs() {
+        when (val d = dialog) {
+            null -> Unit
+            UiDialog.Menu -> MenuDialog()
+            UiDialog.Sort -> SortDialog()
+            is UiDialog.Search -> InputDialog(
+                title = "検索（" + d.baseName + " 以下）",
+                initial = "", hint = "ファイル名の一部", positiveLabel = "検索"
+            ) { v -> runSearch(d.basePath, v) }
+            UiDialog.JumpPath -> InputDialog(
+                title = "パスを入力して移動",
+                initial = currentDir?.absolutePath ?: "", hint = null, positiveLabel = "移動"
+            ) { v ->
+                val f = File(v.trim())
+                if (f.isDirectory) openFolder(f) else toast("フォルダが見つかりません")
+            }
+            is UiDialog.Create -> InputDialog(
+                title = if (d.folder) "新規フォルダ" else "新規ファイル",
+                initial = "", hint = if (d.folder) "フォルダ名" else "ファイル名 (例: memo.txt)",
+                positiveLabel = "作成"
+            ) { v -> doCreate(d.folder, v) }
+            is UiDialog.Rename -> InputDialog(
+                title = "名前変更",
+                initial = File(d.path).name, hint = null, positiveLabel = "変更"
+            ) { v -> doRename(d.path, v) }
+            UiDialog.DeleteConfirm -> AlertDialog(
+                onDismissRequest = { dialog = null },
+                title = { Text("削除しますか？") },
+                text = { Text(selected.size.toString() + " 件を削除します。元に戻せません。") },
+                confirmButton = { TextButton(onClick = { dialog = null; doDelete() }) { Text("削除") } },
+                dismissButton = { TextButton(onClick = { dialog = null }) { Text("キャンセル") } }
+            )
+            is UiDialog.Details -> AlertDialog(
+                onDismissRequest = { dialog = null },
+                title = { Text("詳細") },
+                text = { Text(d.message) },
+                confirmButton = {
+                    if (d.file.isFile) TextButton(onClick = { dialog = null; shareFile(d.file) }) { Text("共有") }
+                },
+                dismissButton = { TextButton(onClick = { dialog = null }) { Text("閉じる") } }
+            )
+            is UiDialog.ImagePreview -> AlertDialog(
+                onDismissRequest = { dialog = null },
+                title = { Text(d.file.name) },
+                text = {
+                    Image(
+                        d.bitmap.asImageBitmap(), contentDescription = d.file.name,
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier.fillMaxWidth().heightIn(max = 420.dp)
+                    )
+                },
+                confirmButton = { TextButton(onClick = { dialog = null; openExternal(d.file) }) { Text("外部アプリで開く") } },
+                dismissButton = { TextButton(onClick = { dialog = null }) { Text("閉じる") } }
+            )
+            is UiDialog.TextPreview -> AlertDialog(
+                onDismissRequest = { dialog = null },
+                title = { Text(d.file.name) },
+                text = {
+                    Column(Modifier.verticalScroll(rememberScrollState()).heightIn(max = 420.dp)) {
+                        Text(d.text, fontSize = 13.sp)
+                    }
+                },
+                confirmButton = { TextButton(onClick = { dialog = null; openExternal(d.file) }) { Text("外部アプリで開く") } },
+                dismissButton = { TextButton(onClick = { dialog = null }) { Text("閉じる") } }
+            )
+            is UiDialog.FavRemove -> AlertDialog(
+                onDismissRequest = { dialog = null },
+                title = { Text("お気に入りから外しますか？") },
+                text = { Text(d.path) },
+                confirmButton = {
+                    TextButton(onClick = {
+                        dialog = null
+                        val fav = favorites().toMutableSet(); fav.remove(d.path)
+                        prefs.edit().putStringSet("favorites", fav).apply()
+                        showHome()
+                    }) { Text("外す") }
+                },
+                dismissButton = { TextButton(onClick = { dialog = null }) { Text("キャンセル") } }
+            )
+            UiDialog.Permission -> AlertDialog(
+                onDismissRequest = { dialog = null },
+                title = { Text("ファイルへのアクセス") },
+                text = { Text("内部ストレージ全体を見るには「すべてのファイルへのアクセス」の許可が必要です。設定画面で許可してください。許可しなくてもアプリ専用フォルダは使えます。") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        dialog = null
+                        try {
+                            val i = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION)
+                            i.data = Uri.parse("package:$packageName"); startActivity(i)
+                        } catch (e: Exception) {
+                            startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+                        }
+                    }) { Text("設定を開く") }
+                },
+                dismissButton = { TextButton(onClick = { dialog = null }) { Text("あとで") } }
+            )
+        }
+    }
+
+    @Composable
+    private fun InputDialog(title: String, initial: String, hint: String?, positiveLabel: String,
+                            onConfirm: (String) -> Unit) {
+        var text by remember { mutableStateOf(initial) }
+        AlertDialog(
+            onDismissRequest = { dialog = null },
+            title = { Text(title) },
+            text = {
+                OutlinedTextField(
+                    value = text, onValueChange = { text = it },
+                    placeholder = hint?.let { { Text(it) } },
+                    singleLine = true, modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = { TextButton(onClick = { val v = text; dialog = null; onConfirm(v) }) { Text(positiveLabel) } },
+            dismissButton = { TextButton(onClick = { dialog = null }) { Text("キャンセル") } }
+        )
+    }
+
+    @Composable
+    private fun MenuDialog() {
+        val items = buildMenuItems()
+        AlertDialog(
+            onDismissRequest = { dialog = null },
+            title = { Text("メニュー") },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    for (s in items) {
+                        Text(
+                            s, fontSize = 16.sp,
+                            modifier = Modifier.fillMaxWidth()
+                                .clickable { dialog = null; onMenuItem(s) }
+                                .padding(vertical = 12.dp)
+                        )
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = { TextButton(onClick = { dialog = null }) { Text("キャンセル") } }
+        )
+    }
+
+    @Composable
+    private fun SortDialog() {
+        val labels = listOf("名前 ↑", "名前 ↓", "日付 新しい順", "日付 古い順", "サイズ 大きい順", "サイズ 小さい順", "種類順")
+        AlertDialog(
+            onDismissRequest = { dialog = null },
+            title = { Text("並び替え") },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    labels.forEachIndexed { w, s ->
+                        Text(
+                            s, fontSize = 16.sp,
+                            modifier = Modifier.fillMaxWidth()
+                                .clickable { dialog = null; applySort(w) }
+                                .padding(vertical = 12.dp)
+                        )
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = { TextButton(onClick = { dialog = null }) { Text("キャンセル") } }
+        )
+    }
+
+    // ================================================================
+    //  ロジック (旧 View 版からそのまま移植)
+    // ================================================================
     // ----- ホーム -----
     private fun showHome() {
         mode = MODE_HOME; currentTitle = "ファイル"; selected.clear(); dirHistory.clear()
@@ -284,7 +522,6 @@ class MainActivity : Activity() {
         homeActions.add("recent"); homeActions.add("download")
         homeActions.add("storage"); homeActions.add("appfolder")
         for (fav in favorites()) homeActions.add("fav:$fav")
-        updateStorageBar()
         refresh()
     }
 
@@ -328,45 +565,14 @@ class MainActivity : Activity() {
         return LinkedHashSet(prefs.getStringSet("favorites", HashSet()) ?: emptySet())
     }
 
-    private fun updateStorageBar() {
-        val r = internalRoot()
-        val total = r.totalSpace
-        val free = r.freeSpace
-        if (total > 0) {
-            val used = total - free
-            storageView.text = "💾 内部ストレージ: ${FileOps.formatSize(used)} / ${FileOps.formatSize(total)} 使用中（空き ${FileOps.formatSize(free)}）"
-            storageBar.max = 100
-            storageBar.progress = (used * 100 / total).toInt()
-            storageView.visibility = View.VISIBLE; storageBar.visibility = View.VISIBLE
-        }
-    }
-
     // ----- 表示更新 -----
     private fun refresh() {
-        titleView.text = "📂 $currentTitle" + if (selected.isEmpty()) "" else "（${selected.size}件選択）"
-        if (mode == MODE_HOME) {
-            pathView.text = "カテゴリ・保存場所から探せます。長押しは使いません（タップで開く）"
-            adapter.clear(); for (i in homeActions.indices) adapter.add("")
-            emptyView.visibility = if (homeActions.isEmpty()) View.VISIBLE else View.GONE
-        } else if (mode == MODE_BROWSE) {
-            pathView.text = currentDir!!.absolutePath + "  （タップで移動）"
+        if (mode == MODE_BROWSE) {
             val files = FileOps.listDir(currentDir, showHidden)
             FileOps.sortFiles(files, sortMode, sortAsc)
             currentFiles = files
-            adapter.clear(); for (i in files.indices) adapter.add("")
-            emptyView.text = "このフォルダは空です"
-            emptyView.visibility = if (files.isEmpty()) View.VISIBLE else View.GONE
-        } else {
-            pathView.text = currentTitle + "（内部ストレージ内を集めています）"
-            adapter.clear(); for (i in currentFiles.indices) adapter.add("")
-            emptyView.text = "見つかりませんでした"
-            emptyView.visibility = if (currentFiles.isEmpty()) View.VISIBLE else View.GONE
         }
-        adapter.notifyDataSetChanged()
-        bottomBar.visibility = if (selected.isEmpty()) View.GONE else View.VISIBLE
-        pasteBar.visibility = if (clipboard.isNotEmpty() && mode == MODE_BROWSE) View.VISIBLE else View.GONE
-        if (mode != MODE_HOME) { storageView.visibility = View.GONE; storageBar.visibility = View.GONE }
-        else updateStorageBar()
+        uiTick++
     }
 
     private fun openFolder(dir: File?) {
@@ -386,7 +592,7 @@ class MainActivity : Activity() {
     private fun loadCategory(cat: Int) {
         mode = MODE_CATEGORY; currentCategory = cat; currentTitle = FileOps.categoryLabel(cat); selected.clear()
         currentFiles = mutableListOf(); refresh()
-        Toast.makeText(this, "検索中…", Toast.LENGTH_SHORT).show()
+        toast("検索中…", long = false)
         Thread {
             val found = FileOps.collectByCategory(internalRoot(), cat, 500, 8)
             runOnUiThread { if (mode == MODE_CATEGORY && currentCategory == cat) { currentFiles = found; refresh() } }
@@ -424,14 +630,7 @@ class MainActivity : Activity() {
         if (mode == MODE_HOME) {
             val act = homeActions[pos]
             if (act.startsWith("fav:")) {
-                val path = act.substring(4)
-                AlertDialog.Builder(this).setTitle("お気に入りから外しますか？")
-                    .setMessage(path)
-                    .setPositiveButton("外す") { _, _ ->
-                        val fav = favorites().toMutableSet(); fav.remove(path)
-                        prefs.edit().putStringSet("favorites", fav).apply()
-                        showHome()
-                    }.setNegativeButton("キャンセル", null).show()
+                dialog = UiDialog.FavRemove(act.substring(4))
             }
             return
         }
@@ -459,7 +658,7 @@ class MainActivity : Activity() {
             i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             startActivity(i)
         } catch (e: Exception) {
-            Toast.makeText(this, "開けるアプリが見つかりません", Toast.LENGTH_LONG).show()
+            toast("開けるアプリが見つかりません")
         }
     }
 
@@ -471,7 +670,7 @@ class MainActivity : Activity() {
             i.putExtra(Intent.EXTRA_STREAM, uri)
             i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             startActivity(Intent.createChooser(i, "共有"))
-        } catch (e: Exception) { Toast.makeText(this, "共有できませんでした", Toast.LENGTH_LONG).show() }
+        } catch (e: Exception) { toast("共有できませんでした") }
     }
 
     private fun showImagePreview(f: File) {
@@ -485,10 +684,7 @@ class MainActivity : Activity() {
         val o = BitmapFactory.Options(); o.inSampleSize = sample
         val bmp = BitmapFactory.decodeFile(f.absolutePath, o)
         if (bmp == null) { openExternal(f); return }
-        val iv = ImageView(this); iv.setImageBitmap(bmp); iv.adjustViewBounds = true
-        AlertDialog.Builder(this).setTitle(f.name).setView(iv)
-            .setPositiveButton("外部アプリで開く") { _, _ -> openExternal(f) }
-            .setNegativeButton("閉じる", null).show()
+        dialog = UiDialog.ImagePreview(f, bmp)
     }
 
     private fun showTextPreview(f: File) {
@@ -505,18 +701,12 @@ class MainActivity : Activity() {
                 text = String(buf, 0, off, StandardCharsets.UTF_8)
             } catch (e: Exception) { text = "（読み込めませんでした）" }
             val shown = text
-            runOnUiThread {
-                val tv = TextView(this); tv.text = shown; tv.textSize = 13f; tv.setPadding(dp(12), dp(12), dp(12), dp(12))
-                val sv = ScrollView(this); sv.addView(tv)
-                AlertDialog.Builder(this).setTitle(f.name).setView(sv)
-                    .setPositiveButton("外部アプリで開く") { _, _ -> openExternal(f) }
-                    .setNegativeButton("閉じる", null).show()
-            }
+            runOnUiThread { dialog = UiDialog.TextPreview(f, shown) }
         }.start()
     }
 
     // ----- メニュー -----
-    private fun showMenu() {
+    private fun buildMenuItems(): MutableList<String> {
         val items = mutableListOf<String>()
         items.add("🏠 ホームへ")
         items.add("🔍 検索")
@@ -525,20 +715,21 @@ class MainActivity : Activity() {
         items.add((if (showHidden) "✅" else "⬜") + " 隠しファイルを表示")
         items.add("🔐 すべてのファイルへのアクセス設定")
         items.add("🔄 更新")
-        AlertDialog.Builder(this).setTitle("メニュー").setItems(items.toTypedArray()) { _, w ->
-            val s = items[w]
-            when {
-                s.startsWith("🏠") -> showHome()
-                s.startsWith("🔍") -> askSearch()
-                s.startsWith("📁") -> askCreate(true)
-                s.startsWith("📝") -> askCreate(false)
-                s.startsWith("⭐") -> addFavorite(currentDir!!)
-                s.startsWith("↕️") -> askSort()
-                s.contains("隠しファイル") -> { showHidden = !showHidden; prefs.edit().putBoolean("showHidden", showHidden).apply(); refresh() }
-                s.startsWith("🔐") -> checkPermission(true)
-                else -> refresh()
-            }
-        }.show()
+        return items
+    }
+
+    private fun onMenuItem(s: String) {
+        when {
+            s.startsWith("🏠") -> showHome()
+            s.startsWith("🔍") -> askSearch()
+            s.startsWith("📁") -> dialog = UiDialog.Create(true)
+            s.startsWith("📝") -> dialog = UiDialog.Create(false)
+            s.startsWith("⭐") -> addFavorite(currentDir!!)
+            s.startsWith("↕️") -> dialog = UiDialog.Sort
+            s.contains("隠しファイル") -> { showHidden = !showHidden; prefs.edit().putBoolean("showHidden", showHidden).apply(); refresh() }
+            s.startsWith("🔐") -> checkPermission(true)
+            else -> refresh()
+        }
     }
 
     private fun sortLabel(): String {
@@ -546,99 +737,84 @@ class MainActivity : Activity() {
         return n[sortMode] + if (sortAsc) " ↑" else " ↓"
     }
 
-    private fun askSort() {
-        val labels = arrayOf("名前 ↑", "名前 ↓", "日付 新しい順", "日付 古い順", "サイズ 大きい順", "サイズ 小さい順", "種類順")
-        AlertDialog.Builder(this).setTitle("並び替え").setItems(labels) { _, w ->
-            when (w) {
-                0 -> { sortMode = FileOps.SORT_NAME; sortAsc = true }
-                1 -> { sortMode = FileOps.SORT_NAME; sortAsc = false }
-                2 -> { sortMode = FileOps.SORT_DATE; sortAsc = false }
-                3 -> { sortMode = FileOps.SORT_DATE; sortAsc = true }
-                4 -> { sortMode = FileOps.SORT_SIZE; sortAsc = false }
-                5 -> { sortMode = FileOps.SORT_SIZE; sortAsc = true }
-                else -> { sortMode = FileOps.SORT_TYPE; sortAsc = true }
-            }
-            prefs.edit().putInt("sortMode", sortMode).putBoolean("sortAsc", sortAsc).apply()
-            refresh()
-        }.show()
-    }
-
-    private fun askJumpPath() {
-        val et = EditText(this); et.setText(currentDir!!.absolutePath); et.isSingleLine = true
-        AlertDialog.Builder(this).setTitle("パスを入力して移動").setView(et)
-            .setPositiveButton("移動") { _, _ ->
-                val f = File(et.text.toString().trim())
-                if (f.isDirectory) openFolder(f) else Toast.makeText(this, "フォルダが見つかりません", Toast.LENGTH_LONG).show()
-            }.setNegativeButton("キャンセル", null).show()
+    private fun applySort(w: Int) {
+        when (w) {
+            0 -> { sortMode = FileOps.SORT_NAME; sortAsc = true }
+            1 -> { sortMode = FileOps.SORT_NAME; sortAsc = false }
+            2 -> { sortMode = FileOps.SORT_DATE; sortAsc = false }
+            3 -> { sortMode = FileOps.SORT_DATE; sortAsc = true }
+            4 -> { sortMode = FileOps.SORT_SIZE; sortAsc = false }
+            5 -> { sortMode = FileOps.SORT_SIZE; sortAsc = true }
+            else -> { sortMode = FileOps.SORT_TYPE; sortAsc = true }
+        }
+        prefs.edit().putInt("sortMode", sortMode).putBoolean("sortAsc", sortAsc).apply()
+        refresh()
     }
 
     private fun askSearch() {
-        val et = EditText(this); et.hint = "ファイル名の一部"
         val base = if (mode == MODE_BROWSE) currentDir!! else internalRoot()
-        AlertDialog.Builder(this).setTitle("検索（" + base.name + " 以下）").setView(et)
-            .setPositiveButton("検索") { _, _ ->
-                val q = et.text.toString().trim(); if (q.isEmpty()) return@setPositiveButton
-                mode = MODE_SEARCH; currentSearchQuery = q; currentTitle = "検索: $q"; selected.clear(); currentFiles = mutableListOf(); refresh()
-                Thread {
-                    val found = FileOps.searchRecursive(base, q, 500, 8)
-                    FileOps.sortFiles(found, FileOps.SORT_NAME, true)
-                    runOnUiThread { if (mode == MODE_SEARCH && q == currentSearchQuery) { currentFiles = found; refresh() } }
-                }.start()
-            }.setNegativeButton("キャンセル", null).show()
+        dialog = UiDialog.Search(base.absolutePath, base.name)
+    }
+
+    private fun runSearch(basePath: String, rawQuery: String) {
+        val q = rawQuery.trim(); if (q.isEmpty()) return
+        val base = File(basePath)
+        mode = MODE_SEARCH; currentSearchQuery = q; currentTitle = "検索: $q"; selected.clear(); currentFiles = mutableListOf(); refresh()
+        Thread {
+            val found = FileOps.searchRecursive(base, q, 500, 8)
+            FileOps.sortFiles(found, FileOps.SORT_NAME, true)
+            runOnUiThread { if (mode == MODE_SEARCH && q == currentSearchQuery) { currentFiles = found; refresh() } }
+        }.start()
     }
 
     // ----- 作成 / 名前変更 / 削除 / 詳細 -----
-    private fun askCreate(folder: Boolean) {
-        val et = EditText(this); et.hint = if (folder) "フォルダ名" else "ファイル名 (例: memo.txt)"
-        AlertDialog.Builder(this).setTitle(if (folder) "新規フォルダ" else "新規ファイル").setView(et)
-            .setPositiveButton("作成") { _, _ ->
-                val name = et.text.toString().trim()
-                if (!FileOps.isSafeName(name)) { Toast.makeText(this, "使えない名前です", Toast.LENGTH_LONG).show(); return@setPositiveButton }
-                val f = File(currentDir, name)
-                try {
-                    val ok = if (folder) f.mkdirs() else f.createNewFile()
-                    if (!ok) Toast.makeText(this, "作成できませんでした（同名あり等）", Toast.LENGTH_LONG).show()
-                } catch (e: Exception) { Toast.makeText(this, "作成できませんでした: " + e.message, Toast.LENGTH_LONG).show() }
-                refresh()
-            }.setNegativeButton("キャンセル", null).show()
+    private fun doCreate(folder: Boolean, rawName: String) {
+        val name = rawName.trim()
+        if (!FileOps.isSafeName(name)) { toast("使えない名前です"); return }
+        val f = File(currentDir, name)
+        try {
+            val ok = if (folder) f.mkdirs() else f.createNewFile()
+            if (!ok) toast("作成できませんでした（同名あり等）")
+        } catch (e: Exception) { toast("作成できませんでした: " + e.message) }
+        refresh()
     }
 
     private fun askRenameSingle() {
-        if (selected.size != 1) { Toast.makeText(this, "名前変更は1件だけ選んでください", Toast.LENGTH_LONG).show(); return }
-        val f = File(selected.iterator().next())
-        val et = EditText(this); et.setText(f.name)
-        AlertDialog.Builder(this).setTitle("名前変更").setView(et)
-            .setPositiveButton("変更") { _, _ ->
-                val name = et.text.toString().trim()
-                if (!FileOps.isSafeName(name)) { Toast.makeText(this, "使えない名前です", Toast.LENGTH_LONG).show(); return@setPositiveButton }
-                val dst = File(f.parentFile, name)
-                if (dst.exists() || !f.renameTo(dst)) Toast.makeText(this, "変更できませんでした", Toast.LENGTH_LONG).show()
-                selected.clear(); afterOperationRefresh()
-            }.setNegativeButton("キャンセル", null).show()
+        if (selected.size != 1) { toast("名前変更は1件だけ選んでください"); return }
+        dialog = UiDialog.Rename(selected.iterator().next())
+    }
+
+    private fun doRename(path: String, rawName: String) {
+        val f = File(path)
+        val name = rawName.trim()
+        if (!FileOps.isSafeName(name)) { toast("使えない名前です"); return }
+        val dst = File(f.parentFile, name)
+        if (dst.exists() || !f.renameTo(dst)) toast("変更できませんでした")
+        selected.clear(); afterOperationRefresh()
     }
 
     private fun askDeleteSelected() {
         if (selected.isEmpty()) return
-        AlertDialog.Builder(this).setTitle("削除しますか？")
-            .setMessage(selected.size.toString() + " 件を削除します。元に戻せません。")
-            .setPositiveButton("削除") { _, _ ->
-                val targets = ArrayList(selected)
-                selected.clear()
-                Thread {
-                    var fail = 0
-                    for (pth in targets) if (!FileOps.deleteRecursive(File(pth))) fail++
-                    val f2 = fail
-                    runOnUiThread {
-                        Toast.makeText(this, if (f2 == 0) "削除しました" else "一部削除できませんでした", Toast.LENGTH_LONG).show()
-                        afterOperationRefresh()
-                    }
-                }.start()
-            }.setNegativeButton("キャンセル", null).show()
+        dialog = UiDialog.DeleteConfirm
+    }
+
+    private fun doDelete() {
+        val targets = ArrayList(selected)
+        selected.clear()
+        Thread {
+            var fail = 0
+            for (pth in targets) if (!FileOps.deleteRecursive(File(pth))) fail++
+            val f2 = fail
+            runOnUiThread {
+                toast(if (f2 == 0) "削除しました" else "一部削除できませんでした")
+                afterOperationRefresh()
+            }
+        }.start()
     }
 
     private fun showDetailsSingle() {
         if (selected.size != 1) {
-            Toast.makeText(this, "詳細は1件だけ選んでください（長押しで選択）", Toast.LENGTH_LONG).show(); return
+            toast("詳細は1件だけ選んでください（長押しで選択）"); return
         }
         val f = File(selected.iterator().next())
         Thread {
@@ -653,12 +829,7 @@ class MainActivity : Activity() {
             val msg = "名前: ${f.name}\nパス: ${f.absolutePath}\n種類: $typeLabel\nサイズ: $sizeText$extra" +
                 "\n更新: ${FileOps.formatDate(f.lastModified())}" +
                 "\n読み取り: ${if (f.canRead()) "可" else "不可"} / 書き込み: ${if (f.canWrite()) "可" else "不可"}"
-            runOnUiThread {
-                val b = AlertDialog.Builder(this).setTitle("詳細").setMessage(msg)
-                    .setNegativeButton("閉じる", null)
-                if (f.isFile) b.setPositiveButton("共有") { _, _ -> shareFile(f) }
-                b.show()
-            }
+            runOnUiThread { dialog = UiDialog.Details(f, msg) }
         }.start()
     }
 
@@ -668,7 +839,7 @@ class MainActivity : Activity() {
         clipboard.clear()
         for (p in selected) clipboard.add(File(p))
         clipboardCut = cut; selected.clear()
-        Toast.makeText(this, clipboard.size.toString() + " 件を" + (if (cut) "切り取り" else "コピー") + "しました。貼り付け先のフォルダを開いてください", Toast.LENGTH_LONG).show()
+        toast(clipboard.size.toString() + " 件を" + (if (cut) "切り取り" else "コピー") + "しました。貼り付け先のフォルダを開いてください")
         refresh()
     }
 
@@ -694,7 +865,7 @@ class MainActivity : Activity() {
             val f2 = fail
             runOnUiThread {
                 clipboard.clear(); selected.clear()
-                Toast.makeText(this, if (f2 == 0) "貼り付けました" else "一部貼り付けできませんでした", Toast.LENGTH_LONG).show()
+                toast(if (f2 == 0) "貼り付けました" else "一部貼り付けできませんでした")
                 refresh()
             }
         }.start()
@@ -709,7 +880,7 @@ class MainActivity : Activity() {
     private fun addFavorite(dir: File) {
         val fav = favorites().toMutableSet(); fav.add(dir.absolutePath)
         prefs.edit().putStringSet("favorites", fav).apply()
-        Toast.makeText(this, "お気に入りに追加しました（ホームに表示）", Toast.LENGTH_LONG).show()
+        toast("お気に入りに追加しました（ホームに表示）")
     }
 
     // ----- 権限 -----
@@ -718,24 +889,15 @@ class MainActivity : Activity() {
             if (!Environment.isExternalStorageManager()) {
                 if (!forceOpen && prefs.getBoolean("permDialogShown", false)) return // 起動時の案内は初回だけ
                 prefs.edit().putBoolean("permDialogShown", true).apply()
-                AlertDialog.Builder(this).setTitle("ファイルへのアクセス")
-                    .setMessage("内部ストレージ全体を見るには「すべてのファイルへのアクセス」の許可が必要です。設定画面で許可してください。許可しなくてもアプリ専用フォルダは使えます。")
-                    .setPositiveButton("設定を開く") { _, _ ->
-                        try {
-                            val i = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION)
-                            i.data = Uri.parse("package:$packageName"); startActivity(i)
-                        } catch (e: Exception) {
-                            startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
-                        }
-                    }.setNegativeButton("あとで", null).show()
-            } else if (forceOpen) Toast.makeText(this, "すでに許可されています", Toast.LENGTH_SHORT).show()
+                dialog = UiDialog.Permission
+            } else if (forceOpen) toast("すでに許可されています", long = false)
         } else if (checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE,
                 Manifest.permission.WRITE_EXTERNAL_STORAGE), 1)
-        } else if (forceOpen) Toast.makeText(this, "すでに許可されています", Toast.LENGTH_SHORT).show()
+        } else if (forceOpen) toast("すでに許可されています", long = false)
     }
 
-    override fun onBackPressed() {
+    private fun handleBack() {
         if (selected.isNotEmpty()) { selected.clear(); refresh(); return }
         if (mode == MODE_BROWSE) {
             if (dirHistory.isNotEmpty()) openFolderNoHistory(dirHistory.pop())
@@ -743,8 +905,8 @@ class MainActivity : Activity() {
             return
         }
         if (mode != MODE_HOME) { showHome(); return }
-        super.onBackPressed()
+        finish()
     }
 
-    override fun onResume() { super.onResume(); if (mode == MODE_HOME) updateStorageBar() }
+    override fun onResume() { super.onResume(); if (mode == MODE_HOME) uiTick++ }
 }

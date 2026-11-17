@@ -39,7 +39,7 @@ Kotlin・外部ライブラリなし（Android標準API + Kotlin標準ライブ�
 - Android 10以前: ストレージの読み書き権限を要求します。
 
 ## ビルド（リリースビルドはコマンド1つ）
-Gradle/AGPを使わないオフライン手動ビルド（aapt2 + kotlinc + d8）です。
+Gradle/AGPを使わないオフライン手動ビルド（aapt2 + kotlinc + D8）です。UI は Jetpack Compose（Compose 1.7.6 / Material3）で、ライブラリは `tools/resolve.py` が Google Maven / Maven Central から `libs/` へ解決・取得します（初回ビルド時のみネットワークと python3 が必要）。デクサは build-tools 同梱 d8 の不具合を避けるため単体 R8 8.7.18 の D8 CLI を使い、マルチ dex で同梱します。
 
 **ワンコマンドビルド**（テスト → ビルド → 署名 → 成果物表示まで一括）:
 
@@ -64,6 +64,11 @@ RELEASE_KEYSTORE=/path/to/release.jks RELEASE_KEY_ALIAS=mykey RELEASE_KEYSTORE_P
 ```
 
 Android Studio で開くための Gradle ファイル（AGP 8.7.3 + kotlin-android 2.0.21）も同梱しています。
+
+## v1.2.0 での変更（Jetpack Compose化 + 新アイコン）
+- UI 層を Jetpack Compose（Material3）に全面移行。画面構成・挙動は v1.1.0 と同一（ホームのカテゴリ/最近/ストレージ容量バー、お気に入り、閲覧・並び替え・隠しファイル切替・再帰検索、コピー/切り取り/貼り付け、新規作成/名前変更/削除、詳細・共有、画像/テキストのアプリ内プレビュー、状態の保存/復元）
+- アプリアイコンを新しいアートワークに変更（アダプティブアイコン + 従来解像度の mipmap 一式、roundIcon 対応）
+- ビルドパイプラインを Compose 対応に更新（Maven 版 Compose コンパイラプラグイン、ライブラリ AAR のリソースリンク、単体 R8 によるマルチ dex）。単体テスト 67 件はそのまま全パス
 
 ## v1.1.0 での変更（Kotlin化）
 - 全ソース (FileOps / MainActivity / SimpleFileProvider / FileListAdapter) と単体テストを Java から Kotlin 2.0.21 に書き換え。機能・挙動は v1.0.1 と同一で、単体テスト66件もそのまま移植して全パス
