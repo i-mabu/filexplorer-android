@@ -38,15 +38,32 @@ Kotlin・外部ライブラリなし（Android標準API + Kotlin標準ライブ�
   許可しなくてもアプリ専用フォルダは使えます。
 - Android 10以前: ストレージの読み書き権限を要求します。
 
-## ビルド
-Gradle/AGPを使わないオフライン手動ビルド（aapt2 + javac + d8）です。要 JDK 21 と Android SDK (platform 34 / build-tools 34.0.0)。
+## ビルド（リリースビルドはコマンド1つ）
+Gradle/AGPを使わないオフライン手動ビルド（aapt2 + kotlinc + d8）です。
+
+**ワンコマンドビルド**（テスト → ビルド → 署名 → 成果物表示まで一括）:
 
 ```sh
-./tests/run-tests.sh   # 単体テスト (FileOps: 66件、Kotlin)
-./build-apk.sh         # dist/filexplorer.apk を生成 (デバッグ署名)
+./build.sh      # Linux / macOS (引数なし=デバッグ署名 / release でリリース署名)
+build.bat       # Windows (同上)
 ```
 
-Android Studio で開くための Gradle ファイル（AGP 8.7.3）も同梱しています。
+前提: JDK 17+（21推奨）/ Kotlin コンパイラ 2.0.21 / Android SDK（platform 34・build-tools 34.0.0）。SDK の場所は環境変数 `ANDROID_SDK_ROOT`（または `ANDROID_HOME`）で指定します。Kotlin は `KOTLINC` / `KOTLIN_HOME` / PATH の順に探します。
+
+デフォルト（引数なし）ではデバッグ鍵で署名します（上書きインストール用）。配布用に自分のリリース鍵で署名する場合は、`release` を付け、環境変数でキーストアを指定してください（鍵情報はスクリプトに書かれません）。成果物は `dist/filexplorer-release.apk` になります:
+
+```sh
+RELEASE_KEYSTORE=/path/to/release.jks RELEASE_KEY_ALIAS=mykey RELEASE_KEYSTORE_PASS=xxxx ./build.sh release
+```
+
+個別に実行する場合:
+
+```sh
+./tests/run-tests.sh   # 単体テスト (FileOps: 67件、Kotlin)
+./build-apk.sh         # build.sh の本体 (引数なし=debug / release で dist/filexplorer-release.apk)
+```
+
+Android Studio で開くための Gradle ファイル（AGP 8.7.3 + kotlin-android 2.0.21）も同梱しています。
 
 ## v1.1.0 での変更（Kotlin化）
 - 全ソース (FileOps / MainActivity / SimpleFileProvider / FileListAdapter) と単体テストを Java から Kotlin 2.0.21 に書き換え。機能・挙動は v1.0.1 と同一で、単体テスト66件もそのまま移植して全パス
