@@ -649,11 +649,10 @@ class MainActivity : Activity() {
                 sizeText = FileOps.formatSize(FileOps.totalSize(f))
                 extra = "\n中身: ファイル " + c[0] + " 件 / フォルダ " + c[1] + " 件"
             } else sizeText = FileOps.formatSize(f.length())
-            val msg = "名前: " + f.name + "\nパス: " + f.absolutePath
-                .plus("\n種類: " + if (f.isDirectory) "フォルダ" else FileOps.categoryLabel(FileOps.categoryOf(f.name)))
-                .plus("\nサイズ: " + sizeText + extra)
-                .plus("\n更新: " + FileOps.formatDate(f.lastModified()))
-                .plus("\n読み取り: " + (if (f.canRead()) "可" else "不可") + " / 書き込み: " + (if (f.canWrite()) "可" else "不可"))
+            val typeLabel = if (f.isDirectory) "フォルダ" else FileOps.categoryLabel(FileOps.categoryOf(f.name))
+            val msg = "名前: ${f.name}\nパス: ${f.absolutePath}\n種類: $typeLabel\nサイズ: $sizeText$extra" +
+                "\n更新: ${FileOps.formatDate(f.lastModified())}" +
+                "\n読み取り: ${if (f.canRead()) "可" else "不可"} / 書き込み: ${if (f.canWrite()) "可" else "不可"}"
             runOnUiThread {
                 val b = AlertDialog.Builder(this).setTitle("詳細").setMessage(msg)
                     .setNegativeButton("閉じる", null)

@@ -204,6 +204,10 @@ object FileOps {
     @JvmStatic
     fun countItems(dir: File?): IntArray = countRec(dir, 0)
 
+    // Java 版からある互換用エイリアス (countItems と同一)
+    @JvmStatic
+    fun countItemsExact(dir: File?): IntArray = countItems(dir)
+
     private fun countRec(dir: File?, depth: Int): IntArray {
         val c = intArrayOf(0, 0)
         if (dir == null || depth > MAX_DEPTH) return c

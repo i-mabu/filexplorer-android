@@ -72,6 +72,8 @@ fun main() {
         eq("totalSize", 13L, FileOps.totalSize(root))
         val counts = FileOps.countItems(root)
         eq("count files", 3, counts[0]); eq("count dirs", 1, counts[1])
+        val countsExact = FileOps.countItemsExact(root)
+        check("countItemsExact alias", countsExact[0] == counts[0] && countsExact[1] == counts[1])
         // listDir の隠しファイル絞り込み
         eq("list no hidden", 2, FileOps.listDir(root, false).size)
         eq("list with hidden", 3, FileOps.listDir(root, true).size)
