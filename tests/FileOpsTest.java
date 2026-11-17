@@ -94,6 +94,11 @@ public class FileOpsTest {
             eq("collect image", 1, imgs.size());
             List<File> recents = FileOps.collectRecent(root, 3, 5);
             check("recent limit", recents.size() <= 3 && !recents.isEmpty());
+            // recent must be newest-first by mtime
+            File oldF = write(new File(root, "old.txt"), "o"); oldF.setLastModified(1000000000000L);
+            File newF = write(new File(root, "new.txt"), "n"); newF.setLastModified(1900000000000L);
+            List<File> rec2 = FileOps.collectRecent(root, 50, 5);
+            check("recent newest first", rec2.get(0).getName().equals("new.txt"));
             // sort: folders first, name asc
             List<File> list = new ArrayList<>();
             list.add(new File(root, "z.txt")); list.add(sub); list.add(a);
@@ -102,6 +107,33 @@ public class FileOpsTest {
             eq("sort name", "a.txt", list.get(1).getName());
             FileOps.sortFiles(list, FileOps.SORT_NAME, false);
             eq("sort name desc", "z.txt", list.get(1).getName());
+            // formatSize boundary: 1,048,575 B must not show "1024 KB"
+            eq("size boundary", "1.00 MB", FileOps.formatSize(1048575));
+            // isSameOrInside
+            check("inside true", FileOps.isSameOrInside(root, sub));
+            check("inside self", FileOps.isSameOrInside(root, root));
+            check("inside false", !FileOps.isSameOrInside(sub, root));
+            // copy into itself / subfolder must be rejected
+            boolean rejected = false;
+            try { FileOps.copyRecursive(sub, sub); } catch (java.io.IOException e) { rejected = true; }
+            check("copy into itself rejected", rejected);
+            boolean rejected2 = false;
+            try { FileOps.copyRecursive(root, sub); } catch (java.io.IOException e) { rejected2 = true; }
+            check("copy into subfolder rejected", rejected2);
+            // symlink loop must not hang / overflow in totalSize, count, search, collect
+            try {
+                java.nio.file.Files.createSymbolicLink(new File(root, "loop").toPath(), root.toPath());
+                long sz = FileOps.totalSize(root);
+                check("symlink loop totalSize finite", sz >= 13 && sz < 100000);
+                int[] cc = FileOps.countItems(root);
+                check("symlink loop count finite", cc[0] >= 3 && cc[1] >= 1);
+                check("symlink loop search ok", FileOps.searchRecursive(root, "a.txt", 10, 8).size() >= 1);
+                check("symlink loop collect ok", FileOps.collectRecent(root, 5, 8).size() >= 1);
+                check("delete symlink itself", FileOps.deleteRecursive(new File(root, "loop")));
+                check("symlink target intact", a.exists());
+            } catch (Exception e) {
+                System.out.println("symlink tests skipped: " + e);
+            }
             // delete recursive
             check("delete dir", FileOps.deleteRecursive(dstDir));
             check("deleted gone", !dstDir.exists());

@@ -14,6 +14,6 @@ public class FileListAdapter extends ArrayAdapter<String> {
         this.act = act;
     }
     @Override public View getView(int pos, View convert, ViewGroup parent) {
-        return act.buildRow(pos);
+        return act.buildRow(pos, convert);
     }
 }

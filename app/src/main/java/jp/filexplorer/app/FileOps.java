@@ -6,6 +6,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.nio.file.Files;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -137,6 +138,8 @@ public final class FileOps {
         double v = bytes;
         int i = -1;
         do { v /= 1024.0; i++; } while (v >= 1024 && i < u.length - 1);
+        // 丸めると 1024 になる境界 (例: 1,048,575 B = 1023.999 KB) は単位を繰り上げる
+        if (i < u.length - 1 && v >= 1023.995) { v /= 1024.0; i++; }
         if (v >= 100) return String.format(Locale.ROOT, "%.0f %s", v, u[i]);
         if (v >= 10) return String.format(Locale.ROOT, "%.1f %s", v, u[i]);
         return String.format(Locale.ROOT, "%.2f %s", v, u[i]);
@@ -164,31 +167,51 @@ public final class FileOps {
                         break;
                     default: r = a.getName().compareToIgnoreCase(b.getName()); break;
                 }
+                if (r == 0 && mode != SORT_NAME) r = a.getName().compareToIgnoreCase(b.getName());
                 return ascending ? r : -r;
             });
+    }
+
+    private static final int MAX_DEPTH = 32;
+
+    public static boolean isSymbolicLink(File f) {
+        try { return f != null && Files.isSymbolicLink(f.toPath()); }
+        catch (Exception e) { return false; }
+    }
+
+    // child が parent 自身か、その配下にあるか (canonical path で判定)
+    public static boolean isSameOrInside(File parent, File child) {
+        try {
+            String p = parent.getCanonicalPath();
+            String c = child.getCanonicalPath();
+            return c.equals(p) || c.startsWith(p + File.separator);
+        } catch (Exception e) { return false; }
     }
 
     // ファイルは length、フォルダは直下だけでは測れないので length を使う (一覧の高速化のため)
     static long sizeOf(File f) { return f.isDirectory() ? 0 : f.length(); }
 
-    public static long totalSize(File f) {
-        if (f == null || !f.exists()) return 0;
-        if (f.isFile()) return f.length();
+    public static long totalSize(File f) { return totalSizeRec(f, 0); }
+    private static long totalSizeRec(File f, int depth) {
+        if (f == null || !f.exists() || depth > MAX_DEPTH) return 0;
+        if (f.isFile() || isSymbolicLink(f)) return f.length();
         long sum = 0;
         File[] kids = f.listFiles();
-        if (kids != null) for (File k : kids) sum += totalSize(k);
+        if (kids != null) for (File k : kids) sum += totalSizeRec(k, depth + 1);
         return sum;
     }
 
     // {ファイル数, フォルダ数} を再帰で数える
     public static int[] countItems(File dir) { return countItemsExact(dir); }
 
-    public static int[] countItemsExact(File dir) {
+    public static int[] countItemsExact(File dir) { return countRec2(dir, 0); }
+    private static int[] countRec2(File dir, int depth) {
         int[] c = {0, 0};
-        File[] kids = dir == null ? null : dir.listFiles();
+        if (dir == null || depth > MAX_DEPTH) return c;
+        File[] kids = dir.listFiles();
         if (kids == null) return c;
         for (File k : kids) {
-            if (k.isDirectory()) { c[1]++; int[] sub = countItemsExact(k); c[0] += sub[0]; c[1] += sub[1]; }
+            if (k.isDirectory() && !isSymbolicLink(k)) { c[1]++; int[] sub = countRec2(k, depth + 1); c[0] += sub[0]; c[1] += sub[1]; }
             else c[0]++;
         }
         return c;
@@ -196,7 +219,7 @@ public final class FileOps {
 
     public static boolean deleteRecursive(File f) {
         if (f == null || !f.exists()) return false;
-        if (f.isDirectory()) {
+        if (f.isDirectory() && !isSymbolicLink(f)) {
             File[] kids = f.listFiles();
             if (kids != null) for (File k : kids) deleteRecursive(k);
         }
@@ -213,13 +236,17 @@ public final class FileOps {
     }
 
     public static File copyRecursive(File src, File dstDir) throws IOException {
+        // 自分自身や自分の配下へのコピーは、コピー先が走査対象に含まれて無限再帰になるため禁止
+        if (src.isDirectory() && isSameOrInside(src, dstDir)) {
+            throw new IOException("コピー先がコピー元フォルダの中にあります: " + dstDir);
+        }
         File dst = uniqueFile(dstDir, src.getName());
         copyRecursiveInto(src, dst);
         return dst;
     }
 
     private static void copyRecursiveInto(File src, File dst) throws IOException {
-        if (src.isDirectory()) {
+        if (src.isDirectory() && !isSymbolicLink(src)) {
             if (!dst.exists() && !dst.mkdirs()) throw new IOException("フォルダを作成できません: " + dst);
             File[] kids = src.listFiles();
             if (kids != null) for (File k : kids) copyRecursiveInto(k, new File(dst, k.getName()));
@@ -267,38 +294,40 @@ public final class FileOps {
         for (File k : kids) {
             if (out.size() >= max) return;
             if (k.getName().toLowerCase(Locale.ROOT).contains(q)) out.add(k);
-            if (k.isDirectory()) searchRec(k, q, out, max, depth + 1, maxDepth);
+            if (k.isDirectory() && !isSymbolicLink(k)) searchRec(k, q, out, max, depth + 1, maxDepth);
         }
     }
 
+    private static final int MAX_VISITED = 8000;
+
     public static List<File> collectByCategory(File root, int cat, int maxResults, int maxDepth) {
         List<File> out = new ArrayList<>();
-        collectRec(root, out, maxResults, 0, maxDepth, cat, null);
+        collectRec(root, out, maxResults, 0, maxDepth, cat, new int[]{0});
         sortFilesByDateDesc(out);
         return out;
     }
 
     public static List<File> collectRecent(File root, int maxResults, int maxDepth) {
         List<File> out = new ArrayList<>();
-        collectRec(root, out, 500, 0, maxDepth, -1, null);
+        // 先に見つけた500件ではなく、走査した全体 (上限 MAX_VISITED 件) から新しい順に選ぶ
+        collectRec(root, out, MAX_VISITED, 0, maxDepth, -1, new int[]{0});
         sortFilesByDateDesc(out);
         if (out.size() > maxResults) return new ArrayList<>(out.subList(0, maxResults));
         return out;
     }
 
-    private static int visited = 0;
-    private static void collectRec(File f, List<File> out, int max, int depth, int maxDepth, int cat, Object unused) {
-        if (depth == 0) visited = 0;
-        if (out.size() >= max || depth > maxDepth || f == null || visited > 8000) return;
+    // visited は呼び出しごとのカウンタ配列で持つ (static だと並行実行で競合する)
+    private static void collectRec(File f, List<File> out, int max, int depth, int maxDepth, int cat, int[] visited) {
+        if (out.size() >= max || depth > maxDepth || f == null || visited[0] > MAX_VISITED) return;
         File[] kids = f.listFiles();
         if (kids == null) return;
         for (File k : kids) {
-            visited++;
-            if (visited > 8000) return;
+            visited[0]++;
+            if (visited[0] > MAX_VISITED) return;
             if (k.isFile()) {
                 if (cat < 0 || categoryOf(k.getName()) == cat) out.add(k);
-            } else if (k.isDirectory() && !isHiddenName(k.getName())) {
-                collectRec(k, out, max, depth + 1, maxDepth, cat, unused);
+            } else if (k.isDirectory() && !isHiddenName(k.getName()) && !isSymbolicLink(k)) {
+                collectRec(k, out, max, depth + 1, maxDepth, cat, visited);
             }
         }
     }

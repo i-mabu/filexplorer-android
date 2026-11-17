@@ -17,7 +17,6 @@ import android.provider.Settings;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ImageView;
@@ -30,7 +29,6 @@ import android.widget.Toast;
 
 import java.io.File;
 import java.io.FileInputStream;
-import java.io.FileOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -57,6 +55,8 @@ public class MainActivity extends Activity {
     private List<String> homeActions = new ArrayList<>(); // ホーム行のアクションID
 
     private final Set<String> selected = new LinkedHashSet<>();
+    private final java.util.ArrayDeque<File> dirHistory = new java.util.ArrayDeque<>();
+    private String currentSearchQuery = "";
     private List<File> clipboard = new ArrayList<>();
     private boolean clipboardCut = false;
 
@@ -78,8 +78,53 @@ public class MainActivity extends Activity {
         showHidden = prefs.getBoolean("showHidden", false);
         currentDir = internalRoot();
         buildUi();
-        showHome();
+        if (savedInstanceState != null && restoreState(savedInstanceState)) {
+            // 復元できた場合はホームに戻さない (回転などで閲覧位置とクリップボードを保持)
+        } else {
+            showHome();
+        }
         checkPermission(false);
+    }
+
+    // ----- 状態の保存 / 復元 (画面回転や再作成で閲覧位置・選択・クリップボードを失わない) -----
+    @Override protected void onSaveInstanceState(Bundle out) {
+        super.onSaveInstanceState(out);
+        out.putInt("mode", mode);
+        out.putString("dir", currentDir == null ? "" : currentDir.getAbsolutePath());
+        out.putInt("category", currentCategory);
+        out.putString("title", currentTitle);
+        out.putString("query", currentSearchQuery);
+        out.putStringArrayList("selected", new ArrayList<>(selected));
+        ArrayList<String> clip = new ArrayList<>();
+        for (File f : clipboard) clip.add(f.getAbsolutePath());
+        out.putStringArrayList("clipboard", clip);
+        out.putBoolean("clipCut", clipboardCut);
+        ArrayList<String> hist = new ArrayList<>();
+        for (File f : dirHistory) hist.add(f.getAbsolutePath());
+        out.putStringArrayList("history", hist);
+    }
+    private boolean restoreState(Bundle b) {
+        try {
+            int m = b.getInt("mode", MODE_HOME);
+            ArrayList<String> sel = b.getStringArrayList("selected");
+            if (sel != null) selected.addAll(sel);
+            ArrayList<String> clip = b.getStringArrayList("clipboard");
+            if (clip != null) for (String s : clip) clipboard.add(new File(s));
+            clipboardCut = b.getBoolean("clipCut", false);
+            ArrayList<String> hist = b.getStringArrayList("history");
+            if (hist != null) for (String s : hist) dirHistory.add(new File(s));
+            currentCategory = b.getInt("category", -1);
+            currentSearchQuery = b.getString("query", "");
+            String dir = b.getString("dir", "");
+            if (m == MODE_BROWSE && dir != null && new File(dir).isDirectory()) {
+                mode = MODE_BROWSE; currentDir = new File(dir);
+                currentTitle = currentDir.getName().isEmpty() ? currentDir.getAbsolutePath() : currentDir.getName();
+                refresh(); return true;
+            }
+            if (m == MODE_CATEGORY && currentCategory >= 0) { loadCategory(currentCategory); return true; }
+            if (m == MODE_RECENT) { loadRecent(); return true; }
+            return false;
+        } catch (Exception e) { return false; }
     }
 
     // ----- UI構築 -----
@@ -174,18 +219,31 @@ public class MainActivity extends Activity {
     }
 
     // FileListAdapter から呼ばれる行描画 (インナークラスを使うとこの環境の d8 が落ちるため分離)
-    View buildRow(int pos) {
-            LinearLayout row = new LinearLayout(this);
-            row.setOrientation(LinearLayout.HORIZONTAL);
-            row.setGravity(Gravity.CENTER_VERTICAL);
-            row.setPadding(dp(12), dp(10), dp(12), dp(10));
-            TextView icon = new TextView(this); icon.setTextSize(26);
-            LinearLayout texts = new LinearLayout(this);
-            texts.setOrientation(LinearLayout.VERTICAL);
-            TextView name = new TextView(this); name.setTextSize(16); name.setTextColor(Color.rgb(32,33,36));
-            TextView sub = new TextView(this); sub.setTextSize(12); sub.setTextColor(Color.rgb(95,99,104));
-            texts.addView(name); texts.addView(sub);
-            row.addView(icon); row.addView(texts);
+    View buildRow(int pos, View convert) {
+            // 行の再利用 (convertView) でスクロールの GC 負荷を下げる
+            LinearLayout row; TextView icon; TextView name; TextView sub;
+            if (convert instanceof LinearLayout && ((LinearLayout) convert).getChildCount() == 2
+                    && ((LinearLayout) convert).getChildAt(1) instanceof LinearLayout
+                    && ((LinearLayout) ((LinearLayout) convert).getChildAt(1)).getChildCount() == 2) {
+                row = (LinearLayout) convert;
+                icon = (TextView) row.getChildAt(0);
+                LinearLayout texts0 = (LinearLayout) row.getChildAt(1);
+                name = (TextView) texts0.getChildAt(0);
+                sub = (TextView) texts0.getChildAt(1);
+                row.setBackgroundColor(Color.WHITE);
+            } else {
+                row = new LinearLayout(this);
+                row.setOrientation(LinearLayout.HORIZONTAL);
+                row.setGravity(Gravity.CENTER_VERTICAL);
+                row.setPadding(dp(12), dp(10), dp(12), dp(10));
+                icon = new TextView(this); icon.setTextSize(26);
+                LinearLayout texts = new LinearLayout(this);
+                texts.setOrientation(LinearLayout.VERTICAL);
+                name = new TextView(this); name.setTextSize(16); name.setTextColor(Color.rgb(32,33,36));
+                sub = new TextView(this); sub.setTextSize(12); sub.setTextColor(Color.rgb(95,99,104));
+                texts.addView(name); texts.addView(sub);
+                row.addView(icon); row.addView(texts);
+            }
             if (mode == MODE_HOME) {
                 String act = homeActions.get(pos);
                 icon.setText(homeIcon(act));
@@ -209,7 +267,7 @@ public class MainActivity extends Activity {
 
     // ----- ホーム -----
     private void showHome() {
-        mode = MODE_HOME; currentTitle = "ファイル"; selected.clear();
+        mode = MODE_HOME; currentTitle = "ファイル"; selected.clear(); dirHistory.clear();
         homeActions.clear();
         homeActions.add("cat:0"); homeActions.add("cat:1"); homeActions.add("cat:2");
         homeActions.add("cat:3"); homeActions.add("cat:4"); homeActions.add("cat:5");
@@ -299,6 +357,11 @@ public class MainActivity extends Activity {
 
     private void openFolder(File dir) {
         if (dir == null || !dir.isDirectory()) return;
+        if (mode == MODE_BROWSE && currentDir != null && !dir.equals(currentDir)) dirHistory.push(currentDir);
+        mode = MODE_BROWSE; currentDir = dir; currentTitle = dir.getName().isEmpty() ? dir.getAbsolutePath() : dir.getName();
+        selected.clear(); refresh();
+    }
+    private void openFolderNoHistory(File dir) {
         mode = MODE_BROWSE; currentDir = dir; currentTitle = dir.getName().isEmpty() ? dir.getAbsolutePath() : dir.getName();
         selected.clear(); refresh();
     }
@@ -337,7 +400,20 @@ public class MainActivity extends Activity {
         if (f.isDirectory()) openFolder(f); else openFile(f);
     }
     private void onItemLongClick(int pos) {
-        if (mode == MODE_HOME) return;
+        if (mode == MODE_HOME) {
+            String act = homeActions.get(pos);
+            if (act.startsWith("fav:")) {
+                String path = act.substring(4);
+                new AlertDialog.Builder(this).setTitle("お気に入りから外しますか？")
+                        .setMessage(path)
+                        .setPositiveButton("外す", (d, w) -> {
+                            Set<String> fav = favorites(); fav.remove(path);
+                            prefs.edit().putStringSet("favorites", fav).apply();
+                            showHome();
+                        }).setNegativeButton("キャンセル", null).show();
+            }
+            return;
+        }
         toggleSelect(currentFiles.get(pos)); refresh();
     }
     private void toggleSelect(File f) {
@@ -374,7 +450,14 @@ public class MainActivity extends Activity {
         } catch (Exception e) { Toast.makeText(this, "共有できませんでした", Toast.LENGTH_LONG).show(); }
     }
     private void showImagePreview(File f) {
-        BitmapFactory.Options o = new BitmapFactory.Options(); o.inSampleSize = 2;
+        // まず寸法だけ読み、表示に十分な大きさまで縮小してからデコードする (巨大写真での OOM 防止)
+        BitmapFactory.Options bounds = new BitmapFactory.Options();
+        bounds.inJustDecodeBounds = true;
+        BitmapFactory.decodeFile(f.getAbsolutePath(), bounds);
+        int sample = 1;
+        int imgW = bounds.outWidth, imgH = bounds.outHeight;
+        while (imgW / sample > 1024 || imgH / sample > 1024) sample *= 2;
+        BitmapFactory.Options o = new BitmapFactory.Options(); o.inSampleSize = sample;
         Bitmap bmp = BitmapFactory.decodeFile(f.getAbsolutePath(), o);
         if (bmp == null) { openExternal(f); return; }
         ImageView iv = new ImageView(this); iv.setImageBitmap(bmp); iv.setAdjustViewBounds(true);
@@ -384,19 +467,25 @@ public class MainActivity extends Activity {
     }
     private void showTextPreview(File f) {
         if (f.length() > 200 * 1024) { openExternal(f); return; }
-        String text;
-        try {
-            byte[] buf = new byte[(int) f.length()];
-            try (FileInputStream in = new FileInputStream(f)) {
-                int off = 0, n; while ((n = in.read(buf, off, buf.length - off)) > 0) off += n;
-            }
-            text = new String(buf, StandardCharsets.UTF_8);
-        } catch (Exception e) { text = "（読み込めませんでした）"; }
-        TextView tv = new TextView(this); tv.setText(text); tv.setTextSize(13); tv.setPadding(dp(12), dp(12), dp(12), dp(12));
-        ScrollView sv = new ScrollView(this); sv.addView(tv);
-        new AlertDialog.Builder(this).setTitle(f.getName()).setView(sv)
-                .setPositiveButton("外部アプリで開く", (d, w) -> openExternal(f))
-                .setNegativeButton("閉じる", null).show();
+        new Thread(() -> {
+            String text;
+            try {
+                byte[] buf = new byte[(int) f.length()];
+                int off = 0;
+                try (FileInputStream in = new FileInputStream(f)) {
+                    int n; while ((n = in.read(buf, off, buf.length - off)) > 0) off += n;
+                }
+                text = new String(buf, 0, off, StandardCharsets.UTF_8);
+            } catch (Exception e) { text = "（読み込めませんでした）"; }
+            String shown = text;
+            runOnUiThread(() -> {
+                TextView tv = new TextView(this); tv.setText(shown); tv.setTextSize(13); tv.setPadding(dp(12), dp(12), dp(12), dp(12));
+                ScrollView sv = new ScrollView(this); sv.addView(tv);
+                new AlertDialog.Builder(this).setTitle(f.getName()).setView(sv)
+                        .setPositiveButton("外部アプリで開く", (d, w) -> openExternal(f))
+                        .setNegativeButton("閉じる", null).show();
+            });
+        }).start();
     }
 
     // ----- メニュー -----
@@ -456,11 +545,11 @@ public class MainActivity extends Activity {
         new AlertDialog.Builder(this).setTitle("検索（" + base.getName() + " 以下）").setView(et)
                 .setPositiveButton("検索", (d, w) -> {
                     String q = et.getText().toString().trim(); if (q.isEmpty()) return;
-                    mode = MODE_SEARCH; currentTitle = "検索: " + q; selected.clear(); currentFiles = new ArrayList<>(); refresh();
+                    mode = MODE_SEARCH; currentSearchQuery = q; currentTitle = "検索: " + q; selected.clear(); currentFiles = new ArrayList<>(); refresh();
                     new Thread(() -> {
                         List<File> found = FileOps.searchRecursive(base, q, 500, 8);
                         FileOps.sortFiles(found, FileOps.SORT_NAME, true);
-                        runOnUiThread(() -> { if (mode == MODE_SEARCH) { currentFiles = found; refresh(); } });
+                        runOnUiThread(() -> { if (mode == MODE_SEARCH && q.equals(currentSearchQuery)) { currentFiles = found; refresh(); } });
                     }).start();
                 }).setNegativeButton("キャンセル", null).show();
     }
@@ -498,11 +587,17 @@ public class MainActivity extends Activity {
         new AlertDialog.Builder(this).setTitle("削除しますか？")
                 .setMessage(selected.size() + " 件を削除します。元に戻せません。")
                 .setPositiveButton("削除", (d, w) -> {
-                    int fail = 0;
-                    for (String p : new ArrayList<>(selected)) if (!FileOps.deleteRecursive(new File(p))) fail++;
+                    List<String> targets = new ArrayList<>(selected);
                     selected.clear();
-                    Toast.makeText(this, fail == 0 ? "削除しました" : "一部削除できませんでした", Toast.LENGTH_LONG).show();
-                    afterOperationRefresh();
+                    new Thread(() -> {
+                        int fail = 0;
+                        for (String pth : targets) if (!FileOps.deleteRecursive(new File(pth))) fail++;
+                        int f2 = fail;
+                        runOnUiThread(() -> {
+                            Toast.makeText(this, f2 == 0 ? "削除しました" : "一部削除できませんでした", Toast.LENGTH_LONG).show();
+                            afterOperationRefresh();
+                        });
+                    }).start();
                 }).setNegativeButton("キャンセル", null).show();
     }
     private void showDetailsSingle() {
@@ -523,9 +618,12 @@ public class MainActivity extends Activity {
                     + "\nサイズ: " + sizeText + extra
                     + "\n更新: " + FileOps.formatDate(f.lastModified())
                     + "\n読み取り: " + (f.canRead() ? "可" : "不可") + " / 書き込み: " + (f.canWrite() ? "可" : "不可");
-            runOnUiThread(() -> new AlertDialog.Builder(this).setTitle("詳細").setMessage(msg)
-                    .setPositiveButton("共有", (d, w) -> { if (f.isFile()) shareFile(f); })
-                    .setNegativeButton("閉じる", null).show());
+            runOnUiThread(() -> {
+                AlertDialog.Builder b = new AlertDialog.Builder(this).setTitle("詳細").setMessage(msg)
+                        .setNegativeButton("閉じる", null);
+                if (f.isFile()) b.setPositiveButton("共有", (d, w) -> shareFile(f));
+                b.show();
+            });
         }).start();
     }
 
@@ -541,14 +639,19 @@ public class MainActivity extends Activity {
     private void doPaste() {
         if (clipboard.isEmpty() || mode != MODE_BROWSE) return;
         List<File> srcs = new ArrayList<>(clipboard); boolean cut = clipboardCut;
+        final File destDir = currentDir; // 貼り付け先は開始時点のフォルダに固定する (実行中に移動しても変えない)
         new Thread(() -> {
             int fail = 0;
             for (File src : srcs) {
                 try {
+                    if (cut && src.getParentFile() != null
+                            && src.getParentFile().getCanonicalPath().equals(destDir.getCanonicalPath())) {
+                        continue; // 同じフォルダへの切り取り貼り付けは何もしない
+                    }
                     if (cut) {
-                        File dst = FileOps.uniqueFile(currentDir, src.getName());
-                        if (!src.renameTo(dst)) { FileOps.copyRecursive(src, currentDir); FileOps.deleteRecursive(src); }
-                    } else FileOps.copyRecursive(src, currentDir);
+                        File dst = FileOps.uniqueFile(destDir, src.getName());
+                        if (!src.renameTo(dst)) { FileOps.copyRecursive(src, destDir); FileOps.deleteRecursive(src); }
+                    } else FileOps.copyRecursive(src, destDir);
                 } catch (Exception e) { fail++; }
             }
             int f2 = fail;
@@ -574,6 +677,8 @@ public class MainActivity extends Activity {
     private void checkPermission(boolean forceOpen) {
         if (Build.VERSION.SDK_INT >= 30) {
             if (!Environment.isExternalStorageManager()) {
+                if (!forceOpen && prefs.getBoolean("permDialogShown", false)) return; // 起動時の案内は初回だけ
+                prefs.edit().putBoolean("permDialogShown", true).apply();
                 new AlertDialog.Builder(this).setTitle("ファイルへのアクセス")
                         .setMessage("内部ストレージ全体を見るには「すべてのファイルへのアクセス」の許可が必要です。設定画面で許可してください。許可しなくてもアプリ専用フォルダは使えます。")
                         .setPositiveButton("設定を開く", (d, w) -> {
@@ -594,11 +699,7 @@ public class MainActivity extends Activity {
     @Override public void onBackPressed() {
         if (!selected.isEmpty()) { selected.clear(); refresh(); return; }
         if (mode == MODE_BROWSE) {
-            File parent = currentDir.getParentFile();
-            File root = internalRoot();
-            // 内部ストレージより上には行かずホームへ戻る。アプリ専用フォルダ等も同様にホームへ
-            if (parent != null && (currentDir.getAbsolutePath().startsWith(root.getAbsolutePath())
-                    && !currentDir.equals(root))) openFolder(parent);
+            if (!dirHistory.isEmpty()) openFolderNoHistory(dirHistory.pop());
             else showHome();
             return;
         }
