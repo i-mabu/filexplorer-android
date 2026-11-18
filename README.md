@@ -1,7 +1,7 @@
-# ファイル管理 (FileXplorer) — Android用ファイル管理アプリ v1.1.0
+# ファイル管理 (FileXplorer) — Android用ファイル管理アプリ v1.2.0
 
 Google Files のような使い勝手を目指した、Android用ファイル管理（エクスプローラー風）アプリです。
-Kotlin・外部ライブラリなし（Android標準API + Kotlin標準ライブラリのみ）、minSdk 26 / targetSdk 34、パッケージ `jp.filexplorer.app`。
+Kotlin 製で、ファイル処理は Android 標準 API + Kotlin 標準ライブラリのみ、UI は Jetpack Compose（Compose 1.7.6 / Material3、ライブラリは `libs/` に同梱）。minSdk 26 / targetSdk 34、パッケージ `jp.filexplorer.app`。
 
 ## ✨ 機能
 
@@ -86,8 +86,8 @@ Android Studio で開くための Gradle ファイル（AGP 8.7.3 + kotlin-andro
 - その他: サイズ表示の境界（1024 KB と出る問題）、並び替えの同値タイブレーク、検索の競合ガード、CI の actions を v5 に更新
 
 ## 🧪 検証状況・制限
-- 単体テスト 66/66 パス、APKビルド成功、aapt2 badging（package / versionName 1.0.1）と apksigner verify を確認済み
-- APK: 729,683 bytes、sha256 `e75ad7be88611360e563ed58c02bb7a541790acbe0bc6fc04e5b4b9a8e82ecb4`（デバッグ署名、従来と同一キーで上書きインストール可。Kotlin ランタイムを含むため v1.0.x の 37KB から大きくなっています）
+- 単体テスト 67/67 パス、APKビルド成功、aapt2 badging（package / versionCode 4 / versionName 1.2.0）と apksigner verify を確認済み（2026-11-18）
+- APK: 7,905,977 bytes、sha256 `eed00e684ec586a002a4019bca0b0f58b7f0ccf0ba4e0d7b1c6ef9121e3b9c1a`（デバッグ署名、従来と同一キーで上書きインストール可。Compose / Kotlin ランタイムを含むため大きくなっています）
 - 実機での動作は未検証です（この環境に実機/エミュレータがないため）
 - カテゴリ・最近・検索の走査は内部ストレージ全体が対象のため、ファイル数が非常に多い環境では時間がかかることがあります（走査上限 8,000件 / 深さ 8 で打ち切り）
 - ごみ箱、圧縮ファイルの解凍、クラウドストレージ連携は未実装です

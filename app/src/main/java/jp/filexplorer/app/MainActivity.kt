@@ -168,6 +168,13 @@ class MainActivity : ComponentActivity() {
             }
             if (m == MODE_CATEGORY && currentCategory >= 0) { loadCategory(currentCategory); return true }
             if (m == MODE_RECENT) { loadRecent(); return true }
+            if (m == MODE_SEARCH && currentSearchQuery.isNotBlank()) {
+                // 検索はクエリと起点フォルダを復元して再検索する
+                val base = File(dir)
+                currentDir = if (base.isDirectory) base else internalRoot()
+                runSearch(currentDir!!.absolutePath, currentSearchQuery)
+                return true
+            }
             return false
         } catch (e: Exception) { return false }
     }
@@ -279,7 +286,7 @@ class MainActivity : ComponentActivity() {
 
     private fun pathText(): String {
         return when (mode) {
-            MODE_HOME -> "カテゴリ・保存場所から探せます。長押しは使いません（タップで開く）"
+            MODE_HOME -> "カテゴリ・保存場所から探せます（タップで開く。お気に入りは長押しで解除）"
             MODE_BROWSE -> currentDir!!.absolutePath + "  （タップで移動）"
             else -> currentTitle + "（内部ストレージ内を集めています）"
         }
@@ -596,7 +603,7 @@ class MainActivity : ComponentActivity() {
         toast("検索中…", long = false)
         // 走査はバックグラウンドで行い、反映時にモード/カテゴリが変わっていたら結果を破棄する (競合ガード)
         Thread {
-            val found = FileOps.collectByCategory(internalRoot(), cat, 500, 8)
+            val found = FileOps.collectByCategory(internalRoot(), cat, 500, 8, showHidden)
             runOnUiThread { if (mode == MODE_CATEGORY && currentCategory == cat) { currentFiles = found; refresh() } }
         }.start()
     }
@@ -604,7 +611,7 @@ class MainActivity : ComponentActivity() {
     private fun loadRecent() {
         mode = MODE_RECENT; currentTitle = "最近使ったファイル"; selected.clear(); currentFiles = mutableListOf(); refresh()
         Thread {
-            val found = FileOps.collectRecent(internalRoot(), 100, 8)
+            val found = FileOps.collectRecent(internalRoot(), 100, 8, showHidden)
             runOnUiThread { if (mode == MODE_RECENT) { currentFiles = found; refresh() } }
         }.start()
     }
@@ -729,7 +736,7 @@ class MainActivity : ComponentActivity() {
             s.startsWith("📝") -> dialog = UiDialog.Create(false)
             s.startsWith("⭐") -> addFavorite(currentDir!!)
             s.startsWith("↕️") -> dialog = UiDialog.Sort
-            s.contains("隠しファイル") -> { showHidden = !showHidden; prefs.edit().putBoolean("showHidden", showHidden).apply(); refresh() }
+            s.contains("隠しファイル") -> { showHidden = !showHidden; prefs.edit().putBoolean("showHidden", showHidden).apply(); afterOperationRefresh() }
             s.startsWith("🔐") -> checkPermission(true)
             else -> refresh()
         }
@@ -764,7 +771,7 @@ class MainActivity : ComponentActivity() {
         val base = File(basePath)
         mode = MODE_SEARCH; currentSearchQuery = q; currentTitle = "検索: $q"; selected.clear(); currentFiles = mutableListOf(); refresh()
         Thread {
-            val found = FileOps.searchRecursive(base, q, 500, 8)
+            val found = FileOps.searchRecursive(base, q, 500, 8, showHidden)
             FileOps.sortFiles(found, FileOps.SORT_NAME, true)
             runOnUiThread { if (mode == MODE_SEARCH && q == currentSearchQuery) { currentFiles = found; refresh() } }
         }.start()
@@ -877,6 +884,10 @@ class MainActivity : ComponentActivity() {
     private fun afterOperationRefresh() {
         if (mode == MODE_CATEGORY && currentCategory >= 0) loadCategory(currentCategory)
         else if (mode == MODE_RECENT) loadRecent()
+        else if (mode == MODE_SEARCH && currentSearchQuery.isNotEmpty()) {
+            // 検索結果も再検索して最新化する (検索起点フォルダは currentDir と一致する)
+            runSearch((currentDir ?: internalRoot()).absolutePath, currentSearchQuery)
+        }
         else refresh()
     }
 

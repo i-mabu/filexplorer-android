@@ -18,7 +18,16 @@ class SimpleFileProvider : ContentProvider() {
         const val AUTHORITY = "jp.filexplorer.app.fileprovider"
 
         @JvmStatic
-        fun uriFor(f: File): Uri = Uri.parse("content://" + AUTHORITY + f.absolutePath)
+        fun uriFor(f: File): Uri {
+            // パスセグメントごとにエスケープする (# や ? 等を含むファイル名でも
+            // URI が壊れないように)。受信側は uri.path でデコード済みのパスが得られる
+            val sb = StringBuilder("content://").append(AUTHORITY)
+            for (seg in f.absolutePath.split('/')) {
+                if (seg.isEmpty()) continue
+                sb.append('/').append(Uri.encode(seg))
+            }
+            return Uri.parse(sb.toString())
+        }
     }
 
     private fun allowedRoots(): List<File> {

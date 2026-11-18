@@ -104,7 +104,7 @@ mkdir "%BUILD%\gen" "%BUILD%\classes" "%BUILD%\dex" "%BUILD%\test" "%BUILD%\libr
 echo === [1/2] 単体テスト ===
 call "%KOTLINC%" -nowarn -include-runtime -d "%BUILD%\test\fileops-test.jar" app\src\main\java\jp\filexplorer\app\FileOps.kt tests\FileOpsTest.kt
 if errorlevel 1 ( echo [エラー] テストのコンパイルに失敗しました。& goto :fail )
-"%JAVA%" -cp "%BUILD%\test\fileops-test.jar" jp.filexplorer.app.FileOpsTestKt
+"%JAVA%" -cp "%BUILD%\test\fileops-test.jar" FileOpsTestKt
 if errorlevel 1 ( echo [エラー] 単体テストが失敗しました。& goto :fail )
 echo.
 

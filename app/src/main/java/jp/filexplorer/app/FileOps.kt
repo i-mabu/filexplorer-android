@@ -300,53 +300,57 @@ object FileOps {
         return out
     }
 
+    // showHidden が false のときは、一覧 (listDir) と同じ方針でドット始まりの
+    // ファイル/フォルダを結果に含めず、ドットフォルダの中も辿らない
     @JvmStatic
-    fun searchRecursive(root: File?, query: String?, maxResults: Int, maxDepth: Int): MutableList<File> {
+    fun searchRecursive(root: File?, query: String?, maxResults: Int, maxDepth: Int, showHidden: Boolean = true): MutableList<File> {
         val out = mutableListOf<File>()
         if (root == null || query.isNullOrBlank()) return out
-        searchRec(root, query.lowercase(Locale.ROOT), out, maxResults, 0, maxDepth)
+        searchRec(root, query.lowercase(Locale.ROOT), out, maxResults, 0, maxDepth, showHidden)
         return out
     }
 
-    private fun searchRec(f: File?, q: String, out: MutableList<File>, max: Int, depth: Int, maxDepth: Int) {
+    private fun searchRec(f: File?, q: String, out: MutableList<File>, max: Int, depth: Int, maxDepth: Int, showHidden: Boolean) {
         if (out.size >= max || depth > maxDepth || f == null) return
         val kids = f.listFiles() ?: return
         for (k in kids) {
             if (out.size >= max) return
+            if (!showHidden && isHiddenName(k.name)) continue
             if (k.name.lowercase(Locale.ROOT).contains(q)) out.add(k)
-            if (k.isDirectory && !isSymbolicLink(k)) searchRec(k, q, out, max, depth + 1, maxDepth)
+            if (k.isDirectory && !isSymbolicLink(k)) searchRec(k, q, out, max, depth + 1, maxDepth, showHidden)
         }
     }
 
     @JvmStatic
-    fun collectByCategory(root: File?, cat: Int, maxResults: Int, maxDepth: Int): MutableList<File> {
+    fun collectByCategory(root: File?, cat: Int, maxResults: Int, maxDepth: Int, showHidden: Boolean = true): MutableList<File> {
         val out = mutableListOf<File>()
-        collectRec(root, out, maxResults, 0, maxDepth, cat, intArrayOf(0))
+        collectRec(root, out, maxResults, 0, maxDepth, cat, intArrayOf(0), showHidden)
         sortFilesByDateDesc(out)
         return out
     }
 
     @JvmStatic
-    fun collectRecent(root: File?, maxResults: Int, maxDepth: Int): MutableList<File> {
+    fun collectRecent(root: File?, maxResults: Int, maxDepth: Int, showHidden: Boolean = true): MutableList<File> {
         val out = mutableListOf<File>()
         // 先に見つけた500件ではなく、走査した全体 (上限 MAX_VISITED 件) から新しい順に選ぶ
-        collectRec(root, out, MAX_VISITED, 0, maxDepth, -1, intArrayOf(0))
+        collectRec(root, out, MAX_VISITED, 0, maxDepth, -1, intArrayOf(0), showHidden)
         sortFilesByDateDesc(out)
         if (out.size > maxResults) return ArrayList(out.subList(0, maxResults))
         return out
     }
 
     // visited は呼び出しごとのカウンタ配列で持つ (共有カウンタにすると並行実行で競合するため)
-    private fun collectRec(f: File?, out: MutableList<File>, max: Int, depth: Int, maxDepth: Int, cat: Int, visited: IntArray) {
+    private fun collectRec(f: File?, out: MutableList<File>, max: Int, depth: Int, maxDepth: Int, cat: Int, visited: IntArray, showHidden: Boolean) {
         if (out.size >= max || depth > maxDepth || f == null || visited[0] > MAX_VISITED) return
         val kids = f.listFiles() ?: return
         for (k in kids) {
             visited[0]++
             if (visited[0] > MAX_VISITED) return
+            if (!showHidden && isHiddenName(k.name)) continue
             if (k.isFile) {
                 if (cat < 0 || categoryOf(k.name) == cat) out.add(k)
-            } else if (k.isDirectory && !isHiddenName(k.name) && !isSymbolicLink(k)) {
-                collectRec(k, out, max, depth + 1, maxDepth, cat, visited)
+            } else if (k.isDirectory && !isSymbolicLink(k)) {
+                collectRec(k, out, max, depth + 1, maxDepth, cat, visited, showHidden)
             }
         }
     }
