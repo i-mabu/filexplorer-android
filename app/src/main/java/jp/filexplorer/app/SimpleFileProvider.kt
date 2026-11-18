@@ -41,6 +41,7 @@ class SimpleFileProvider : ContentProvider() {
     @Throws(FileNotFoundException::class)
     private fun fileFor(uri: Uri): File {
         val f = File(uri.path ?: throw FileNotFoundException(uri.toString()))
+        // canonical path で許可ルート配下かを確認し、.. 等での範囲外アクセスを防ぐ
         try {
             val canon = f.canonicalPath
             for (root in allowedRoots()) {
@@ -77,6 +78,7 @@ class SimpleFileProvider : ContentProvider() {
         return c
     }
 
+    // ContentProvider の必須オーバーライドだが、読み取り専用なので書き込み系は何もしない
     override fun insert(uri: Uri, values: ContentValues?): Uri? = null
     override fun delete(uri: Uri, selection: String?, selectionArgs: Array<out String>?): Int = 0
     override fun update(uri: Uri, values: ContentValues?, selection: String?, selectionArgs: Array<out String>?): Int = 0

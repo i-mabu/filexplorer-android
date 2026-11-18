@@ -489,6 +489,7 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     private fun SortDialog() {
+        // ラベルの並び順 (インデックス) は applySort(w) の引数と対応する
         val labels = listOf("名前 ↑", "名前 ↓", "日付 新しい順", "日付 古い順", "サイズ 大きい順", "サイズ 小さい順", "種類順")
         AlertDialog(
             onDismissRequest = { dialog = null },
@@ -511,7 +512,7 @@ class MainActivity : ComponentActivity() {
     }
 
     // ================================================================
-    //  ロジック (旧 View 版からそのまま移植)
+    //  ロジック (Compose化以前の View 版からそのまま移植したもの)
     // ================================================================
     // ----- ホーム -----
     private fun showHome() {
@@ -593,6 +594,7 @@ class MainActivity : ComponentActivity() {
         mode = MODE_CATEGORY; currentCategory = cat; currentTitle = FileOps.categoryLabel(cat); selected.clear()
         currentFiles = mutableListOf(); refresh()
         toast("検索中…", long = false)
+        // 走査はバックグラウンドで行い、反映時にモード/カテゴリが変わっていたら結果を破棄する (競合ガード)
         Thread {
             val found = FileOps.collectByCategory(internalRoot(), cat, 500, 8)
             runOnUiThread { if (mode == MODE_CATEGORY && currentCategory == cat) { currentFiles = found; refresh() } }
@@ -688,6 +690,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun showTextPreview(f: File) {
+        // 200KB を超えるテキストはアプリ内プレビューせず外部アプリに任せる
         if (f.length() > 200 * 1024) { openExternal(f); return }
         Thread {
             var text: String
@@ -897,6 +900,7 @@ class MainActivity : ComponentActivity() {
         } else if (forceOpen) toast("すでに許可されています", long = false)
     }
 
+    // Back の優先順位: 選択解除 → 履歴で親フォルダへ → ホームへ → 終了
     private fun handleBack() {
         if (selected.isNotEmpty()) { selected.clear(); refresh(); return }
         if (mode == MODE_BROWSE) {

@@ -34,6 +34,7 @@ object FileOps {
     @JvmStatic
     fun extension(name: String?): String {
         if (name == null) return ""
+        // 先頭のドット (隠しファイル名) や末尾のドットは拡張子として扱わない
         val i = name.lastIndexOf('.')
         if (i <= 0 || i == name.length - 1) return ""
         return name.substring(i + 1).lowercase(Locale.ROOT)
@@ -151,6 +152,7 @@ object FileOps {
     @JvmStatic
     fun sortFiles(files: MutableList<File>, mode: Int, ascending: Boolean) {
         files.sortWith { a, b ->
+            // フォルダは昇順/降順によらず常に先頭 (方向は同種同士の比較にだけ適用する)
             if (a.isDirectory != b.isDirectory) {
                 if (a.isDirectory) -1 else 1
             } else {
@@ -193,6 +195,7 @@ object FileOps {
 
     private fun totalSizeRec(f: File?, depth: Int): Long {
         if (f == null || !f.exists() || depth > MAX_DEPTH) return 0
+        // シンボリックリンクはリンク先を辿らずリンク自体のサイズで打ち切る (ループ防止)
         if (f.isFile || isSymbolicLink(f)) return f.length()
         var sum = 0L
         val kids = f.listFiles()
@@ -225,6 +228,7 @@ object FileOps {
     @JvmStatic
     fun deleteRecursive(f: File?): Boolean {
         if (f == null || !f.exists()) return false
+        // シンボリックリンクのフォルダは中身を辿らずリンク自体だけを削除する
         if (f.isDirectory && !isSymbolicLink(f)) {
             val kids = f.listFiles()
             if (kids != null) for (k in kids) deleteRecursive(k)
@@ -352,6 +356,7 @@ object FileOps {
         files.sortWith { a, b -> b.lastModified().compareTo(a.lastModified()) }
     }
 
+    // safeName は区切り文字等を置換して安全な名前に整形する (検証して弾く isSafeName とは別)
     @JvmStatic
     fun safeName(name: String?): String {
         if (name == null) return ""
