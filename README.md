@@ -91,3 +91,23 @@ Android Studio で開くための Gradle ファイル（AGP 8.7.3 + kotlin-andro
 - 実機での動作は未検証です（この環境に実機/エミュレータがないため）
 - カテゴリ・最近・検索の走査は内部ストレージ全体が対象のため、ファイル数が非常に多い環境では時間がかかることがあります（走査上限 8,000件 / 深さ 8 で打ち切り）
 - ごみ箱、圧縮ファイルの解凍、クラウドストレージ連携は未実装です
+
+## 👥 Contributors
+
+[![All Contributors](https://img.shields.io/badge/all_contributors-1-orange.svg?style=flat-square)](#contributors)
+
+<!-- ALL-CONTRIBUTORS-LIST:START - Do not remove or modify this section -->
+<!-- prettier-ignore-start -->
+<!-- markdownlint-disable -->
+<table>
+  <tbody>
+    <tr>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/i-mabu"><img src="https://avatars.githubusercontent.com/u/356833989?v=4?s=100" width="100px;" alt="i-mabu"/><br /><sub><b>i-mabu</b></sub></a><br /><a href="https://github.com/i-mabu/filexplorer-android/commits?author=i-mabu" title="Code">💻</a></td>
+    </tr>
+  </tbody>
+</table>
+
+<!-- markdownlint-restore -->
+<!-- prettier-ignore-end -->
+
+<!-- ALL-CONTRIBUTORS-LIST:END -->
