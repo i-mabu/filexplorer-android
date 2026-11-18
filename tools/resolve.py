@@ -158,6 +158,10 @@ ROOTS = [
     ("androidx.activity", "activity-compose", "1.9.3"),
 ]
 
+# 除外リスト: collection-ktx 1.2.0 のクラスは collection-jvm 1.4.0 に統合済みで、
+# 両方を dex すると duplicate class になる (compose-spike README の注意点)
+EXCLUDES = {("androidx.collection", "collection-ktx")}
+
 seen = {}       # (g,a) -> version chosen
 artifacts = []  # (g,a,v,packaging)
 queue = deque(ROOTS)
@@ -171,6 +175,8 @@ while queue:
     print(f"{g}:{a}:{v} [{packaging}] deps={len(deps)}")
     for dg, da, dv, typ, scope, optional in deps:
         if optional or scope in ("test", "provided", "system", "import"):
+            continue
+        if (dg, da) in EXCLUDES:
             continue
         if (dg, da) in seen:
             continue
@@ -198,3 +204,17 @@ for g, a, v, f in ok:
 print(f"\nMISSING {len(missing)}:")
 for m in missing:
     print(f"  {m}")
+
+# 1件でも欠けたら不完全な artifacts.txt を残さず異常終了する
+# (build-apk.sh は artifacts.txt の有無で再解決を判断するため、中途半端な
+#  リストが残ると次回以降も壊れたままになる)
+if missing:
+    print(f"\nERROR: {len(missing)} artifact(s) could not be downloaded; "
+          "libs/artifacts.txt was NOT written", file=sys.stderr)
+    sys.exit(1)
+
+# build-apk.sh が読む成果物リストを書き出す (解決順)
+with open(os.path.join(LIBS, "artifacts.txt"), "w") as f:
+    for _, _, _, fn in ok:
+        f.write(fn + "\n")
+print(f"\nwrote libs/artifacts.txt ({len(ok)} files)")
